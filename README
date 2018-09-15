@@ -1,0 +1,6 @@
+Might as well try to write something useful when picking up go.
+
+Moves messages from KoL chat to a specified discord channel.
+
+Picks up configurations from ./config.json.
+
