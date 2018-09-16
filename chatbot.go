@@ -6,6 +6,7 @@ import (
     "time"
     "syscall"
     "net/url"
+    "golang.org/x/net/html"
     "net/http"
     "net/http/cookiejar"
     "io/ioutil"
@@ -139,7 +140,29 @@ func relay_to_discord(dg *discordgo.Session, message ChatMessage) {
     if !strings.Contains(message.Channel, "clan") {
         return
     }
-    dg.ChannelMessageSend(relay_bot_target_channel, fmt.Sprintf("%s: %s", message.Who.Name, message.Msg))
+
+    raw_message     := message.Msg;
+    cleaned_message := html.UnescapeString(raw_message)
+    if strings.HasPrefix(cleaned_message, "<") {
+        // golden text, chat effects, etc.
+        tokens := html.NewTokenizer(strings.NewReader(cleaned_message))
+        cleaned_message = ""
+        loop:
+        for {
+            tt := tokens.Next()
+            switch tt {
+            case html.ErrorToken:
+                break loop
+            case html.TextToken:
+                cleaned_message = cleaned_message + string(tokens.Text())
+            }
+            // TODO: could grab colors & apply them in markdown
+        }
+    }
+
+    cleaned_message = strings.Replace(cleaned_message, "`", "\\`", -1)
+
+    dg.ChannelMessageSend(relay_bot_target_channel, fmt.Sprintf("**%s**: `%s`", message.Who.Name, cleaned_message))
 }
 
 func open_discord_connection() *discordgo.Session {
