@@ -388,7 +388,7 @@ func main() {
     ticker := time.NewTicker(3*time.Second)
     defer ticker.Stop()
 
-    away_ticker := time.NewTicker(2*time.Minute)
+    away_ticker := time.NewTicker(3*time.Minute)
     defer away_ticker.Stop()
 
     go func() {
