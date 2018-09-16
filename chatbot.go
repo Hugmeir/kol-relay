@@ -2,6 +2,7 @@ package main
 import (
     "os"
     "os/signal"
+    "regexp"
     "fmt"
     "time"
     "syscall"
@@ -17,14 +18,16 @@ import (
     "github.com/bwmarrin/discordgo"
 )
 
-var base_url        string = "https://www.kingdomofloathing.com/"
-var login_url       string = base_url + "login.php"
-var new_message_url string = base_url + "newchatmessages.php"
+var base_url           string = "https://www.kingdomofloathing.com/"
+var login_url          string = base_url + "login.php"
+var new_message_url    string = base_url + "newchatmessages.php"
+var submit_message_url string = base_url + "submitnewchat.php"
 
 var relay_bot_username       string
 var relay_bot_password       string
 var relay_bot_discord_key    string
 var relay_bot_target_channel string
+var password_hash            string
 
 func initialize() {
     contents, err := ioutil.ReadFile("config.json")
@@ -65,6 +68,7 @@ func log_in(http_client *http.Client) []byte {
     defer resp.Body.Close()
 
     body, _ := ioutil.ReadAll(resp.Body)
+    password_hash = request_password_hash(http_client)
     return body
 }
 
@@ -135,6 +139,102 @@ func poll_chat(http_client *http.Client) ChatResponse {
     }
 
     return json_response
+}
+
+/*
+Request URL:http://127.0.0.1:60080/submitnewchat.php?playerid=3061055&pwd=4ecc4ee972866608a6ad77cd311f351d&graf=%2Fclan+(this+is+a+test)&j=1
+Request Method:GET
+Status Code:200 OK
+Remote Address:127.0.0.1:60080
+Response Headers
+view source
+Cache-Control:no-cache, must-revalidate
+Connection:close
+Content-Type:text/html; charset=UTF-8
+Date:Sun Sep 16 03:05:43 CEST 2018
+Pragma:no-cache
+Server:KoLmafia v17.12
+Request Headers
+view source
+Accept-Encoding:gzip, deflate, sdch, br
+Accept-Language:en-US,en;q=0.8,es;q=0.6
+Connection:keep-alive
+Cookie:charpwd=200; chatpwd=252; AWSALB=TLLGQ+HusFbPZkMQOEp9oWMSENzl3phSuZ9y3+barKAgXdzKh1JKlKekkUO+EN0TUhaf2hFhPylGY0bda2DVmTZXbgoQwmrozdbWGHWjXhUUrjmJ/fylNSjLZQ2c
+DNT:1
+Host:127.0.0.1:60080
+Referer:http://127.0.0.1:60080/mchat.php
+User-Agent:Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.71 Safari/537.36
+X-Requested-With:XMLHttpRequest
+Query String Parameters
+view source
+view URL encoded
+playerid:3061055
+pwd:4ecc4ee972866608a6ad77cd311f351d
+graf:/clan (this is a test)
+j:1
+*/
+func submit_chat_to_kol(http_client *http.Client, message string) {
+    playerId := 3152049
+    req, err := http.NewRequest("POST", fmt.Sprintf("%s?playerid=%s&pwd=%s&j=1&graf=%s", submit_message_url, playerId, password_hash, url.QueryEscape(message)), nil)
+    if err != nil {
+        panic(err)
+    }
+    req.Header.Set("Accept-Encoding", "gzip")
+    req.Header.Set("Refered",         "https://www.kingdomofloathing.com/mchat.php")
+
+    resp, err := http_client.Do(req)
+    if err != nil {
+        panic(err)
+    }
+    defer resp.Body.Close()
+
+    body, _ := ioutil.ReadAll(resp.Body)
+
+    if strings.Contains(resp.Header.Get("Content-Encoding"), "gzip") {
+        gr, err := gzip.NewReader(bytes.NewBuffer(body))
+        defer gr.Close()
+        body, err = ioutil.ReadAll(gr)
+        if err != nil {
+            panic(err)
+        }
+    }
+
+    //fmt.Println("submit response: ", string(body))
+}
+
+func request_password_hash(http_client *http.Client) string {
+    req, err := http.NewRequest("GET", base_url + "lchat.php", nil)
+    if err != nil {
+        panic(err)
+    }
+    resp, err := http_client.Do(req)
+    if err != nil {
+        panic(err)
+    }
+    defer resp.Body.Close()
+    body_bytes, _ := ioutil.ReadAll(resp.Body)
+    body := string(body_bytes)
+
+    var HASH_PATTERN_1 = regexp.MustCompile(`name=["']?pwd["']? value=["']([^"']+)["']`)
+    var HASH_PATTERN_2 = regexp.MustCompile(`pwd=([^&]+)`)
+    var HASH_PATTERN_3 = regexp.MustCompile(`pwd = "([^"]+)"`)
+
+    match := HASH_PATTERN_1.FindStringSubmatch(body)
+    if match != nil && len(match) > 0 {
+        return match[1]
+    }
+
+    match = HASH_PATTERN_2.FindStringSubmatch(body)
+    if match != nil && len(match) > 0 {
+        return match[1]
+    }
+
+    match = HASH_PATTERN_3.FindStringSubmatch(body)
+    if match != nil && len(match) > 0 {
+        return match[1]
+    }
+
+    panic("Cannot find password hash?!")
 }
 
 var global_stfu bool = false
@@ -217,9 +317,24 @@ func main() {
     }
 
     _ = log_in(http_client)
+
     // Poll every 3 seconds:
     ticker := time.NewTicker(3*time.Second)
     defer ticker.Stop()
+
+    away_ticker := time.NewTicker(2*time.Minute)
+    defer away_ticker.Stop()
+
+    go func() {
+        submit_chat_to_kol(http_client, "/msg hugmeir oh hai creator")
+        for { // just an infinite loop
+            // select waits until ticker ticks over, then runs this code
+            select {
+                case <-away_ticker.C:
+                    submit_chat_to_kol(http_client, "/who clan")
+            }
+        }
+    }()
 
     go func() {
         for { // just an infinite loop
