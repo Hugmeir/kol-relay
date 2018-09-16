@@ -64,6 +64,7 @@ func NewKoL(username string, password string) KoLRelay {
         http_client: http_client,
         last_seen:   "0",
         player_id:   3152049, // TODO
+        password_hash: "",
     }
     kol.LogIn(password)
 
@@ -78,7 +79,6 @@ var relay_bot_username       string
 var relay_bot_password       string
 var relay_bot_discord_key    string
 var relay_bot_target_channel string
-var password_hash            string
 
 var PASSWORD_HASH_PATTERNS []*regexp.Regexp = []*regexp.Regexp {
     regexp.MustCompile(`name=["']?pwd["']? value=["']([^"']+)["']`),
@@ -217,8 +217,9 @@ func (kol relay) PollChat() (*ChatResponse, error) {
 
 func (kol relay) SubmitChat(message string) error {
     http_client := kol.http_client
-    playerId    := kol.player_id
-    req, err := http.NewRequest("POST", fmt.Sprintf("%s?playerid=%s&pwd=%s&j=1&graf=%s", submit_message_url, playerId, password_hash, url.QueryEscape(message)), nil)
+    msg         := destination + " " + url.QueryEscape(message)
+    final_url   := fmt.Sprintf("%s?playerid=%d&pwd=%s&j=1&graf=%s", submit_message_url, kol.player_id, kol.password_hash, msg)
+    req, err := http.NewRequest("POST", final_url, nil)
     if err != nil {
         return err
     }
@@ -248,43 +249,37 @@ func (kol relay) SubmitChat(message string) error {
     return nil
 }
 
-func (kol relay) resolve_password_hash() error {
+func (kol *relay) ping_lchat_for_data() ([]byte, error) {
     http_client := kol.http_client
     req, err    := http.NewRequest("GET", base_url + "lchat.php", nil)
     if err != nil {
-        return err
+        return nil, err
     }
 
     resp, err := http_client.Do(req)
     if err != nil {
-        return err
+        return nil, err
     }
     defer resp.Body.Close()
     body_bytes, _ := ioutil.ReadAll(resp.Body)
+    return body_bytes, nil
+}
+
+func (kol *relay) resolve_password_hash() error {
+    body_bytes, err := kol.ping_lchat_for_data()
+    if err != nil {
+        fmt.Println("Cannot resolve pwd hash")
+        panic(err)
+    }
     body := string(body_bytes)
+
     for _, pattern := range PASSWORD_HASH_PATTERNS {
         match := pattern.FindStringSubmatch(body)
         if match != nil && len(match) > 0 {
-            kol.password_hash = match[1]
+            kol.password_hash = string(match[1])
             return nil
         }
     }
-/*
-    match := HASH_PATTERN_1.FindStringSubmatch(body)
-    if match != nil && len(match) > 0 {
-        return match[1]
-    }
-
-    match = HASH_PATTERN_2.FindStringSubmatch(body)
-    if match != nil && len(match) > 0 {
-        return match[1]
-    }
-
-    match = HASH_PATTERN_3.FindStringSubmatch(body)
-    if match != nil && len(match) > 0 {
-        return match[1]
-    }
-*/
 
     return errors.New("Cannot find password hash?!")
 }
