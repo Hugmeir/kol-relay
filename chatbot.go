@@ -400,6 +400,12 @@ func main() {
         for { // just an infinite loop
             // select waits until ticker ticks over, then runs this code
             select {
+                case msg := <-discord_to_kol:
+                    // First, disarm the away ticker and re-arm it:
+                    away_ticker.Stop()
+                    away_ticker = time.NewTicker(3*time.Minute)
+                    kol.SubmitChat("/clan", msg)
+                    break
                 case <-away_ticker.C:
                     kol.SubmitChat("/who", "clan")
                     break
