@@ -69,7 +69,10 @@ func NewKoL(username string, password string) KoLRelay {
         player_id:   3152049, // TODO
         password_hash: "",
     }
-    kol.LogIn(password)
+    err := kol.LogIn(password)
+    if err != nil {
+        panic(err)
+    }
 
     return kol
 }
@@ -455,6 +458,12 @@ func main() {
             case <-ticker.C:
                 chat_response, err := kol.PollChat()
                 if err != nil {
+                    // Might as well assume that we git disconnected
+                    err = kol.LogIn(relay_bot_password)
+                    if err != nil {
+                        // Probably rollover?
+                        panic(err)
+                    }
                     fmt.Println("Polling KoL had some error we are now ignoring: ", err)
                     continue
                 }
