@@ -392,6 +392,10 @@ func main() {
             return
         }
 
+        if m.ChannelID != relay_bot_target_channel {
+            return // someone spoke in general, ignore
+        }
+
         if m.Content == "RelayBot, stfu" {
             // We have been asked to quit it, so do!
             global_stfu = true
