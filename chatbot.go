@@ -332,7 +332,7 @@ func open_discord_connection(on_message func(*discordgo.Session, *discordgo.Mess
     return dg
 }
 
-func make_cru_happy_by_not_calling_her_an_apple_she_is_more_of_a_watermelon_anyway(s *discordgo.Session, m *discordgo.MessageCreate) string {
+func resolve_nickname(s *discordgo.Session, m *discordgo.MessageCreate) string {
     c, err := s.Channel(m.ChannelID)
     if err != nil {
         return m.Author.Username
@@ -359,7 +359,7 @@ func make_cru_happy_by_not_calling_her_an_apple_she_is_more_of_a_watermelon_anyw
 // This should be [\p{Latin1}\p{ASCII}], but no such thing in golang
 var non_latin_1_re *regexp.Regexp = regexp.MustCompile(`[^\x00-\xff]`)
 func sanitize_message_for_kol (s *discordgo.Session, m *discordgo.MessageCreate) string {
-    author  := make_cru_happy_by_not_calling_her_an_apple_she_is_more_of_a_watermelon_anyway(s, m)
+    author  := resolve_nickname(s, m)
     content := m.Content
 
     // KoL chat only accepts the latin1 range:
