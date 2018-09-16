@@ -27,11 +27,12 @@ var submit_message_url string = base_url + "submitnewchat.php"
 // TODO: mprotect / mlock this sucker and put it inside the KoL interface
 var kol_password string
 type KoLRelay interface {
-    HttpClient()       *http.Client
     LogIn(string)      error
     PollChat()         (*ChatResponse, error)
-    SubmitChat(string) error
+    SubmitChat(string, string) error
+    PlayerId() int64
 }
+
 type relay struct {
     username      string
     http_client   *http.Client
@@ -71,8 +72,8 @@ func NewKoL(username string, password string) KoLRelay {
     return kol
 }
 
-func (kol relay) HttpClient() *http.Client {
-    return kol.http_client
+func (kol *relay)PlayerId() int64 {
+    return kol.player_id
 }
 
 var relay_bot_username       string
@@ -104,7 +105,7 @@ func initialize() {
     relay_bot_target_channel = discord["channel"].(string)
 }
 
-func (kol relay) LogIn(password string) error {
+func (kol *relay) LogIn(password string) error {
     http_client := kol.http_client
 
     login_params := url.Values{}
@@ -169,7 +170,7 @@ type ChatResponse struct {
     Delay interface{}    `json:"delay"`
 }
 
-func (kol relay) PollChat() (*ChatResponse, error) {
+func (kol *relay) PollChat() (*ChatResponse, error) {
     http_client := kol.http_client
     req, err := http.NewRequest("GET", fmt.Sprintf("%s?lasttime=%s&j=1", new_message_url, kol.last_seen), nil)
     if err != nil {
@@ -215,7 +216,7 @@ func (kol relay) PollChat() (*ChatResponse, error) {
     return &json_response, nil
 }
 
-func (kol relay) SubmitChat(message string) error {
+func (kol *relay) SubmitChat(destination string, message string) error {
     http_client := kol.http_client
     msg         := destination + " " + url.QueryEscape(message)
     final_url   := fmt.Sprintf("%s?playerid=%d&pwd=%s&j=1&graf=%s", submit_message_url, kol.player_id, kol.password_hash, msg)
@@ -356,12 +357,17 @@ func main() {
     defer away_ticker.Stop()
 
     go func() {
-        kol.SubmitChat("/msg hugmeir oh hai creator")
+        err := kol.SubmitChat("/msg hugmeir", "oh hai creator")
+        if err != nil {
+            fmt.Println("Cannot send initial message, something has gone wrong: %v", err)
+            panic(err)
+        }
         for { // just an infinite loop
             // select waits until ticker ticks over, then runs this code
             select {
                 case <-away_ticker.C:
-                    kol.SubmitChat("/who clan")
+                    kol.SubmitChat("/who", "clan")
+                    break
             }
         }
     }()
