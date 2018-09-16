@@ -396,6 +396,13 @@ func main() {
             return // someone spoke in general, ignore
         }
 
+        if m.Content == "" {
+            // Empty message
+            // We get here when someone sends a file/picture etc
+            // with no message body.  Just skip it.
+            return
+        }
+
         if m.Content == "RelayBot, stfu" {
             // We have been asked to quit it, so do!
             global_stfu = true
