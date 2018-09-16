@@ -72,23 +72,23 @@ func log_in(http_client *http.Client) []byte {
 // {"msgs":[{"msg":"Howdy.","type":"public","mid":"1468191682","who":{"name":"Soloflex","id":"2886007","color":"black"},"format":"0","channel":"clan","channelcolor":"green","time":"1537040363"}],"last":"1468191682","delay":3000}
 type KoLPlayer struct {
     Name  string `json:"name"`
-    Id    string `json:"id"`
+    Id    interface{} `json:"id"`
     Color string `json:"color"`
 }
 type ChatMessage struct {
     Msg          string    `json:"msg"`
-    Type         string    `json:"type"`
-    Mid          string    `json:"mid"`
+    Type         interface{}    `json:"type"`
+    Mid          interface{}    `json:"mid"`
     Who          KoLPlayer `json:"who"`
-    Format       string    `json:"format"`
+    Format       interface{}    `json:"format"`
     Channel      string    `json:"channel"`
     ChannelColor string    `json:"channelcolor"`
-    Time         string    `json:"time"`
+    Time         interface{}    `json:"time"`
 }
 type ChatResponse struct {
     Msgs  []ChatMessage  `json:"msgs"`
-    Last  string         `json:"last"`
-    Delay int64          `json:"delay"`
+    Last  interface{}    `json:"last"`
+    Delay interface{}    `json:"delay"`
 }
 
 var last_seen string = "0"
@@ -125,10 +125,19 @@ func poll_chat(http_client *http.Client) ChatResponse {
     var json_response ChatResponse
     err = json.Unmarshal(body, &json_response)
     if err != nil {
+        fmt.Println("The body that broke us: ", string(body))
         panic(err)
     }
 
-    last_seen = json_response.Last
+    switch json_response.Last.(type) {
+        case string:
+            last_seen = json_response.Last.(string)
+            break
+        case float64:
+            last_seen = fmt.Sprintf("%v", json_response.Last)
+            break
+    }
+
     return json_response
 }
 
