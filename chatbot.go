@@ -2,6 +2,7 @@ package main
 import (
     "os"
     "os/signal"
+    "strconv"
     "regexp"
     "fmt"
     "time"
@@ -383,7 +384,26 @@ func main() {
                     continue
                 }
                 for i := 0; i < len(chat_response.Msgs); i++ {
-                    relay_to_discord(dg, chat_response.Msgs[i])
+                    message := chat_response.Msgs[i]
+                    sender := message.Who
+                    var sender_id int64
+                    switch sender.Id.(type) {
+                        case string:
+                            sender_id, _ = strconv.ParseInt(sender.Id.(string), 10, 64)
+                            break
+                        case int64:
+                            sender_id = sender.Id.(int64)
+                            break
+                        case float64:
+                            sender_id = int64(sender.Id.(float64))
+                            break
+                    }
+
+                    if sender_id == kol.PlayerId() {
+                        continue
+                    }
+
+                    relay_to_discord(dg, message)
                 }
             }
         }
