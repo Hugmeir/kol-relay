@@ -13,6 +13,7 @@ import (
     "io/ioutil"
     "bytes"
     "strings"
+    "errors"
     "encoding/json"
     "compress/gzip"
     "github.com/bwmarrin/discordgo"
@@ -23,11 +24,67 @@ var login_url          string = base_url + "login.php"
 var new_message_url    string = base_url + "newchatmessages.php"
 var submit_message_url string = base_url + "submitnewchat.php"
 
+// TODO: mprotect / mlock this sucker and put it inside the KoL interface
+var kol_password string
+type KoLRelay interface {
+    HttpClient()       *http.Client
+    LogIn(string)      error
+    PollChat()         (*ChatResponse, error)
+    SubmitChat(string) error
+}
+type relay struct {
+    username      string
+    http_client   *http.Client
+    session_id    string
+    password_hash string
+    last_seen     string
+    player_id     int64
+}
+
+func NewKoL(username string, password string) KoLRelay {
+    cookie_jar, _ := cookiejar.New(nil)
+    http_client   := &http.Client{
+        Jar:           cookie_jar,
+        CheckRedirect: func(req *http.Request, via []*http.Request) error {
+            // KoL sends the session ID Set-Cookie on a 301, so we need to
+            // check all redirects for cookies.
+            // This looks like a golang bug, in that the cookiejar is not
+            // being updated during redirects.
+            cookies := cookie_jar.Cookies(req.URL)
+            for i := 0; i < len(cookies); i++ {
+                req.Header.Set( cookies[i].Name, cookies[i].Value )
+            }
+            return nil
+        },
+    }
+
+    kol_password = password // TODO
+    kol := &relay{
+        username:    username,
+        http_client: http_client,
+        last_seen:   "0",
+        player_id:   3152049, // TODO
+    }
+    kol.LogIn(password)
+
+    return kol
+}
+
+func (kol relay) HttpClient() *http.Client {
+    return kol.http_client
+}
+
 var relay_bot_username       string
 var relay_bot_password       string
 var relay_bot_discord_key    string
 var relay_bot_target_channel string
 var password_hash            string
+
+var PASSWORD_HASH_PATTERNS []*regexp.Regexp = []*regexp.Regexp {
+    regexp.MustCompile(`name=["']?pwd["']? value=["']([^"']+)["']`),
+    regexp.MustCompile(`pwd=([^&]+)`),
+    regexp.MustCompile(`pwd = "([^"]+)"`),
+}
 
 func initialize() {
     contents, err := ioutil.ReadFile("config.json")
@@ -37,39 +94,56 @@ func initialize() {
 
     var i interface{}
     err = json.Unmarshal(contents, &i)
-    m   := i.(map[string]interface{})
-    kol     := m["kol"].(map[string]interface{})
-    discord := m["discord"].(map[string]interface{})
+    // TODO this can't be right...
+    m                       := i.(map[string]interface{})
+    kol                     := m["kol"].(map[string]interface{})
+    discord                 := m["discord"].(map[string]interface{})
     relay_bot_username       = kol["user"].(string)
     relay_bot_password       = kol["pass"].(string)
     relay_bot_discord_key    = discord["api_key"].(string)
     relay_bot_target_channel = discord["channel"].(string)
 }
 
-func log_in(http_client *http.Client) []byte {
+func (kol relay) LogIn(password string) error {
+    http_client := kol.http_client
+
     login_params := url.Values{}
     login_params.Set("loggingin",    "Yup.")
-    login_params.Set("loginname",    relay_bot_username)
-    login_params.Set("password",     relay_bot_password)
+    login_params.Set("loginname",    kol.username)
+    login_params.Set("password",     kol_password)
     login_params.Set("secure",       "0")
     login_params.Set("submitbutton", "Log In")
 
     login_body := strings.NewReader(login_params.Encode())
     req, err := http.NewRequest("POST", login_url, login_body)
     if err != nil {
-        panic(err)
+        return err
     }
     req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
     resp, err := http_client.Do(req)
 
     if err != nil {
-        panic(err)
+        return err
     }
     defer resp.Body.Close()
 
-    body, _ := ioutil.ReadAll(resp.Body)
-    password_hash = request_password_hash(http_client)
-    return body
+    //body, _ := ioutil.ReadAll(resp.Body)
+    for _, cookie := range http_client.Jar.Cookies(req.URL) {
+        if strings.EqualFold(cookie.Name, "PHPSESSID") {
+            kol.session_id = cookie.Value
+        }
+    }
+
+    if kol.session_id == "" {
+        return errors.New("Failed to aquire session id")
+    }
+
+    err = kol.resolve_password_hash()
+    if err != nil {
+        return err
+    }
+
+    return nil
 }
 
 // {"msgs":[],"last":"1468191607","delay":3000}
@@ -95,11 +169,11 @@ type ChatResponse struct {
     Delay interface{}    `json:"delay"`
 }
 
-var last_seen string = "0"
-func poll_chat(http_client *http.Client) ChatResponse {
-    req, err := http.NewRequest("GET", fmt.Sprintf("%s?lasttime=%s&j=1", new_message_url, last_seen), nil)
+func (kol relay) PollChat() (*ChatResponse, error) {
+    http_client := kol.http_client
+    req, err := http.NewRequest("GET", fmt.Sprintf("%s?lasttime=%s&j=1", new_message_url, kol.last_seen), nil)
     if err != nil {
-        panic(err)
+        return nil, err
     }
     req.Header.Set("Accept",          "application/json, text/javascript, */*; q=0.01")
     req.Header.Set("Accept-Encoding", "gzip")
@@ -107,7 +181,7 @@ func poll_chat(http_client *http.Client) ChatResponse {
 
     resp, err := http_client.Do(req)
     if err != nil {
-        panic(err)
+        return nil, err
     }
     defer resp.Body.Close()
 
@@ -118,7 +192,7 @@ func poll_chat(http_client *http.Client) ChatResponse {
         defer gr.Close()
         body, err = ioutil.ReadAll(gr)
         if err != nil {
-            panic(err)
+            return nil, err
         }
     }
 
@@ -126,65 +200,35 @@ func poll_chat(http_client *http.Client) ChatResponse {
     err = json.Unmarshal(body, &json_response)
     if err != nil {
         fmt.Println("The body that broke us: ", string(body))
-        panic(err)
+        return nil, err
     }
 
     switch json_response.Last.(type) {
         case string:
-            last_seen = json_response.Last.(string)
+            kol.last_seen = json_response.Last.(string)
             break
         case float64:
-            last_seen = fmt.Sprintf("%v", json_response.Last)
+            kol.last_seen = fmt.Sprintf("%v", json_response.Last)
             break
     }
 
-    return json_response
+    return &json_response, nil
 }
 
-/*
-Request URL:http://127.0.0.1:60080/submitnewchat.php?playerid=3061055&pwd=4ecc4ee972866608a6ad77cd311f351d&graf=%2Fclan+(this+is+a+test)&j=1
-Request Method:GET
-Status Code:200 OK
-Remote Address:127.0.0.1:60080
-Response Headers
-view source
-Cache-Control:no-cache, must-revalidate
-Connection:close
-Content-Type:text/html; charset=UTF-8
-Date:Sun Sep 16 03:05:43 CEST 2018
-Pragma:no-cache
-Server:KoLmafia v17.12
-Request Headers
-view source
-Accept-Encoding:gzip, deflate, sdch, br
-Accept-Language:en-US,en;q=0.8,es;q=0.6
-Connection:keep-alive
-Cookie:charpwd=200; chatpwd=252; AWSALB=TLLGQ+HusFbPZkMQOEp9oWMSENzl3phSuZ9y3+barKAgXdzKh1JKlKekkUO+EN0TUhaf2hFhPylGY0bda2DVmTZXbgoQwmrozdbWGHWjXhUUrjmJ/fylNSjLZQ2c
-DNT:1
-Host:127.0.0.1:60080
-Referer:http://127.0.0.1:60080/mchat.php
-User-Agent:Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.71 Safari/537.36
-X-Requested-With:XMLHttpRequest
-Query String Parameters
-view source
-view URL encoded
-playerid:3061055
-pwd:4ecc4ee972866608a6ad77cd311f351d
-graf:/clan (this is a test)
-j:1
-*/
-func submit_chat_to_kol(http_client *http.Client, message string) {
-    playerId := 3152049
+func (kol relay) SubmitChat(message string) error {
+    http_client := kol.http_client
+    playerId    := kol.player_id
     req, err := http.NewRequest("POST", fmt.Sprintf("%s?playerid=%s&pwd=%s&j=1&graf=%s", submit_message_url, playerId, password_hash, url.QueryEscape(message)), nil)
     if err != nil {
-        panic(err)
+        return err
     }
+
     req.Header.Set("Accept-Encoding", "gzip")
     req.Header.Set("Refered",         "https://www.kingdomofloathing.com/mchat.php")
 
     resp, err := http_client.Do(req)
     if err != nil {
-        panic(err)
+        return err
     }
     defer resp.Body.Close()
 
@@ -195,30 +239,37 @@ func submit_chat_to_kol(http_client *http.Client, message string) {
         defer gr.Close()
         body, err = ioutil.ReadAll(gr)
         if err != nil {
-            panic(err)
+            return err
         }
     }
 
     //fmt.Println("submit response: ", string(body))
+
+    return nil
 }
 
-func request_password_hash(http_client *http.Client) string {
-    req, err := http.NewRequest("GET", base_url + "lchat.php", nil)
+func (kol relay) resolve_password_hash() error {
+    http_client := kol.http_client
+    req, err    := http.NewRequest("GET", base_url + "lchat.php", nil)
     if err != nil {
-        panic(err)
+        return err
     }
+
     resp, err := http_client.Do(req)
     if err != nil {
-        panic(err)
+        return err
     }
     defer resp.Body.Close()
     body_bytes, _ := ioutil.ReadAll(resp.Body)
     body := string(body_bytes)
-
-    var HASH_PATTERN_1 = regexp.MustCompile(`name=["']?pwd["']? value=["']([^"']+)["']`)
-    var HASH_PATTERN_2 = regexp.MustCompile(`pwd=([^&]+)`)
-    var HASH_PATTERN_3 = regexp.MustCompile(`pwd = "([^"]+)"`)
-
+    for _, pattern := range PASSWORD_HASH_PATTERNS {
+        match := pattern.FindStringSubmatch(body)
+        if match != nil && len(match) > 0 {
+            kol.password_hash = match[1]
+            return nil
+        }
+    }
+/*
     match := HASH_PATTERN_1.FindStringSubmatch(body)
     if match != nil && len(match) > 0 {
         return match[1]
@@ -233,8 +284,9 @@ func request_password_hash(http_client *http.Client) string {
     if match != nil && len(match) > 0 {
         return match[1]
     }
+*/
 
-    panic("Cannot find password hash?!")
+    return errors.New("Cannot find password hash?!")
 }
 
 var global_stfu bool = false
@@ -297,26 +349,9 @@ func on_message_from_discord(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 func main() {
     initialize()
+    kol := NewKoL(relay_bot_username, relay_bot_password)
 
     dg := open_discord_connection()
-
-    cookie_jar, _ := cookiejar.New(nil)
-    http_client   := &http.Client{
-        Jar:           cookie_jar,
-        CheckRedirect: func(req *http.Request, via []*http.Request) error {
-            // KoL sends the session ID Set-Cookie on a 301, so we need to
-            // check all redirects for cookies.
-            // This looks like a golang bug, in that the cookiejar is not
-            // being updated during redirects.
-            cookies := cookie_jar.Cookies(req.URL)
-            for i := 0; i < len(cookies); i++ {
-                req.Header.Set( cookies[i].Name, cookies[i].Value )
-            }
-            return nil
-        },
-    }
-
-    _ = log_in(http_client)
 
     // Poll every 3 seconds:
     ticker := time.NewTicker(3*time.Second)
@@ -326,12 +361,12 @@ func main() {
     defer away_ticker.Stop()
 
     go func() {
-        submit_chat_to_kol(http_client, "/msg hugmeir oh hai creator")
+        kol.SubmitChat("/msg hugmeir oh hai creator")
         for { // just an infinite loop
             // select waits until ticker ticks over, then runs this code
             select {
                 case <-away_ticker.C:
-                    submit_chat_to_kol(http_client, "/who clan")
+                    kol.SubmitChat("/who clan")
             }
         }
     }()
@@ -341,7 +376,11 @@ func main() {
             // select waits until ticker ticks over, then runs this code
             select {
             case <-ticker.C:
-                chat_response := poll_chat(http_client)
+                chat_response, err := kol.PollChat()
+                if err != nil {
+                    fmt.Println("Polling KoL had some error we are now ignoring: ", err)
+                    continue
+                }
                 for i := 0; i < len(chat_response.Msgs); i++ {
                     relay_to_discord(dg, chat_response.Msgs[i])
                 }
