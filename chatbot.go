@@ -97,10 +97,6 @@ func poll_chat(http_client *http.Client) ChatResponse {
     if err != nil {
         panic(err)
     }
-    cookies := http_client.Jar.Cookies(req.URL)
-    for i := 0; i < len(cookies); i++ {
-        req.Header.Set( cookies[i].Name, cookies[i].Value )
-    }
     req.Header.Set("Accept",          "application/json, text/javascript, */*; q=0.01")
     req.Header.Set("Accept-Encoding", "gzip")
     req.Header.Set("Refered",         "https://www.kingdomofloathing.com/mchat.php")
