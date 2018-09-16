@@ -9,6 +9,7 @@ import (
     "syscall"
     "net/url"
     "golang.org/x/net/html"
+    "golang.org/x/text/encoding/charmap"
     "net/http"
     "net/http/cookiejar"
     "io/ioutil"
@@ -319,36 +320,69 @@ func relay_to_discord(dg *discordgo.Session, message ChatMessage) {
     dg.ChannelMessageSend(relay_bot_target_channel, fmt.Sprintf("**%s**: `%s`", message.Who.Name, cleaned_message))
 }
 
-func open_discord_connection() *discordgo.Session {
+func open_discord_connection(on_message func(*discordgo.Session, *discordgo.MessageCreate)) *discordgo.Session {
     dg, err := discordgo.New("Bot " + relay_bot_discord_key)
 
     err = dg.Open()
     if err != nil {
         panic(err)
     }
-    dg.AddHandler(on_message_from_discord)
+    dg.AddHandler(on_message)
 
     return dg
 }
 
-// Called when the bot sees a message on discord
-func on_message_from_discord(s *discordgo.Session, m *discordgo.MessageCreate) {
-    if m.Content == "RelayBot, stfu" {
-        // We have been asked to quit it, so do!
-        global_stfu = true
-        return
+// This should be [\p{Latin1}\p{ASCII}], but no such thing in golang
+var non_latin_1_re *regexp.Regexp = regexp.MustCompile(`[^\x00-\xff]`)
+func sanitize_message_for_kol (s *discordgo.Session, m *discordgo.MessageCreate) string {
+    author  := m.Author.Username
+    content := m.Content
+
+    // KoL chat only accepts the latin1 range:
+    content = non_latin_1_re.ReplaceAllString(content, ``)
+
+    // KoL chat only accepts latin1, so encode before sending:
+    encoded, err := charmap.ISO8859_1.NewEncoder().String(content)
+    if err != nil {
+        fmt.Printf("Failed to encode message: %v\n", err)
+        encoded = content
     }
-    if m.Content != "RelayBot, spam on" {
-        global_stfu = false
-        return
-    }
+
+    return author + ": " + encoded
 }
 
 func main() {
     initialize()
-    kol := NewKoL(relay_bot_username, relay_bot_password)
+    discord_to_kol := make(chan string)
 
-    dg := open_discord_connection()
+    // Called when the bot sees a message on discord
+    dg := open_discord_connection(func (s *discordgo.Session, m *discordgo.MessageCreate) {
+        if m.Author.ID == s.State.User.ID {
+            // Ignore ourselves
+            return
+        }
+
+        if m.Author.Bot {
+            // Ignore other bots
+            // yes, I am hardcoding /baleet Odebot.  Take that!
+            return
+        }
+
+        if m.Content == "RelayBot, stfu" {
+            // We have been asked to quit it, so do!
+            global_stfu = true
+            return
+        }
+
+        if m.Content == "RelayBot, spam on" {
+            global_stfu = false
+            return
+        }
+
+        message_for_kol := sanitize_message_for_kol(s, m)
+        discord_to_kol <- message_for_kol
+    })
+    kol := NewKoL(relay_bot_username, relay_bot_password)
 
     // Poll every 3 seconds:
     ticker := time.NewTicker(3*time.Second)
