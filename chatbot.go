@@ -417,6 +417,10 @@ func main() {
             return
         }
 
+        if global_stfu {
+            return // respect the desire for silence
+        }
+
         message_for_kol := sanitize_message_for_kol(s, m)
         discord_to_kol <- message_for_kol
     })
