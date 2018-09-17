@@ -570,6 +570,14 @@ func HandleKoLDM(kol KoLRelay, message ChatMessage) {
     }()
 }
 
+func RandomBullshit(s *discordgo.Session, m *discordgo.MessageCreate ) {
+    content := m.Content
+    re := regexp.MustCompile(`(?i)/whois\s+hugmeir`)
+    if re.MatchString(content) && m.Author.Username != "hugmeir" {
+        s.ChannelMessageSend(m.ChannelID, "Ssh! Don't summon the accursed creator!")
+    }
+}
+
 func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, fromDiscord *os.File, discordToKoL chan<- string) {
     if m.Author.ID == s.State.User.ID {
         // Ignore ourselves
@@ -615,6 +623,7 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
         return // respect the desire for silence
     }
 
+    go RandomBullshit(s, m)
 
     author    := sanitize_message_for_kol(ResolveNickname(s, m))
     msgForKoL := sanitize_message_for_kol(m.Content)
