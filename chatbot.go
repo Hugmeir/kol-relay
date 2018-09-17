@@ -29,9 +29,10 @@ var submit_message_url string = base_url + "submitnewchat.php"
 // TODO: mprotect / mlock this sucker and put it inside the KoL interface
 var kol_password string
 type KoLRelay interface {
-    LogIn(string)      error
-    PollChat()         (*ChatResponse, error)
-    SubmitChat(string, string) error
+    LogIn(string)              error
+    SubmitChat(string, string) ([]byte, error)
+    PollChat()                 ([]byte, error)
+    DecodeChat([]byte)         (*ChatResponse, error)
     PlayerId() int64
 }
 
@@ -175,7 +176,7 @@ type ChatResponse struct {
     Delay interface{}    `json:"delay"`
 }
 
-func (kol *relay) PollChat() (*ChatResponse, error) {
+func (kol *relay) PollChat() ([]byte, error) {
     http_client := kol.http_client
     req, err := http.NewRequest("GET", fmt.Sprintf("%s?lasttime=%s&j=1", new_message_url, kol.last_seen), nil)
     if err != nil {
@@ -202,10 +203,14 @@ func (kol *relay) PollChat() (*ChatResponse, error) {
         }
     }
 
+    return body, nil
+}
+
+func (kol *relay)DecodeChat(json_chat []byte) (*ChatResponse, error) {
     var json_response ChatResponse
-    err = json.Unmarshal(body, &json_response)
+    err := json.Unmarshal(json_chat, &json_response)
     if err != nil {
-        fmt.Println("The body that broke us: ", string(body))
+        fmt.Println("The body that broke us: ", string(json_chat))
         return nil, err
     }
 
@@ -221,13 +226,13 @@ func (kol *relay) PollChat() (*ChatResponse, error) {
     return &json_response, nil
 }
 
-func (kol *relay) SubmitChat(destination string, message string) error {
+func (kol *relay) SubmitChat(destination string, message string) ([]byte, error) {
     http_client := kol.http_client
     msg         := destination + " " + url.QueryEscape(message)
     final_url   := fmt.Sprintf("%s?playerid=%d&pwd=%s&j=1&graf=%s", submit_message_url, kol.player_id, kol.password_hash, msg)
     req, err := http.NewRequest("POST", final_url, nil)
     if err != nil {
-        return err
+        return nil, err
     }
 
     req.Header.Set("Accept-Encoding", "gzip")
@@ -235,7 +240,7 @@ func (kol *relay) SubmitChat(destination string, message string) error {
 
     resp, err := http_client.Do(req)
     if err != nil {
-        return err
+        return nil, err
     }
     defer resp.Body.Close()
 
@@ -246,13 +251,11 @@ func (kol *relay) SubmitChat(destination string, message string) error {
         defer gr.Close()
         body, err = ioutil.ReadAll(gr)
         if err != nil {
-            return err
+            return nil, err
         }
     }
 
-    //fmt.Println("submit response: ", string(body))
-
-    return nil
+    return body, nil
 }
 
 func (kol *relay) ping_lchat_for_data() ([]byte, error) {
@@ -434,7 +437,7 @@ func main() {
     defer away_ticker.Stop()
 
     go func() {
-        err := kol.SubmitChat("/msg hugmeir", "oh hai creator")
+        _, err := kol.SubmitChat("/msg hugmeir", "oh hai creator")
         if err != nil {
             fmt.Println("Cannot send initial message, something has gone wrong: %v", err)
             panic(err)
@@ -446,7 +449,11 @@ func main() {
                     // First, disarm the away ticker and re-arm it:
                     away_ticker.Stop()
                     away_ticker = time.NewTicker(3*time.Minute)
-                    kol.SubmitChat("/clan", msg)
+                    _, err := kol.SubmitChat("/clan", msg)
+                    if err != nil {
+                        fmt.Println("Got an error submitting to kol?!")
+                        continue
+                    }
                     break
                 case <-away_ticker.C:
                     kol.SubmitChat("/who", "clan")
@@ -460,7 +467,7 @@ func main() {
             // select waits until ticker ticks over, then runs this code
             select {
             case <-ticker.C:
-                chat_response, err := kol.PollChat()
+                raw_chat_response, err := kol.PollChat()
                 if err != nil {
                     // Might as well assume that we git disconnected
                     err = kol.LogIn(relay_bot_password)
@@ -471,6 +478,12 @@ func main() {
                     fmt.Println("Polling KoL had some error we are now ignoring: ", err)
                     continue
                 }
+
+                chat_response, err := kol.DecodeChat(raw_chat_response)
+                if err != nil {
+                    panic(err)
+                }
+
                 for i := 0; i < len(chat_response.Msgs); i++ {
                     message := chat_response.Msgs[i]
                     sender := message.Who
