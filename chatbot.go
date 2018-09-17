@@ -385,6 +385,21 @@ func main() {
     initialize()
     discord_to_kol := make(chan string)
 
+    from_discord_logfile := "/var/log/kol-relay/from_discord.log"
+    from_kol_logfile     := "/var/log/kol-relay/from_kol.log"
+
+    from_discord, err := os.OpenFile(from_discord_logfile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+    if err != nil {
+        panic(err)
+    }
+    defer from_discord.Close()
+
+    from_kol, err := os.OpenFile(from_kol_logfile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+    if err != nil {
+        panic(err)
+    }
+    defer from_kol.Close()
+
     // Called when the bot sees a message on discord
     dg := open_discord_connection(func (s *discordgo.Session, m *discordgo.MessageCreate) {
         if m.Author.ID == s.State.User.ID {
@@ -401,6 +416,9 @@ func main() {
         if m.ChannelID != relay_bot_target_channel {
             return // someone spoke in general, ignore
         }
+
+        msg_as_json, _ := json.Marshal(m)
+        fmt.Fprintf(from_discord, "%s: %s\n", time.Now().Format(time.RFC3339), msg_as_json)
 
         if m.Content == "" {
             // Empty message
@@ -437,11 +455,12 @@ func main() {
     defer away_ticker.Stop()
 
     go func() {
-        _, err := kol.SubmitChat("/msg hugmeir", "oh hai creator")
+        response_raw, err := kol.SubmitChat("/msg hugmeir", "oh hai creator")
         if err != nil {
             fmt.Println("Cannot send initial message, something has gone wrong: %v", err)
             panic(err)
         }
+        fmt.Fprintf(from_kol, "%s %d [RESPONSE]: %s\n", time.Now().Format(time.RFC3339), os.Getpid(), string(response_raw))
         for { // just an infinite loop
             // select waits until ticker ticks over, then runs this code
             select {
@@ -449,11 +468,12 @@ func main() {
                     // First, disarm the away ticker and re-arm it:
                     away_ticker.Stop()
                     away_ticker = time.NewTicker(3*time.Minute)
-                    _, err := kol.SubmitChat("/clan", msg)
+                    response_raw, err := kol.SubmitChat("/clan", msg)
                     if err != nil {
                         fmt.Println("Got an error submitting to kol?!")
                         continue
                     }
+                    fmt.Fprintf(from_kol, "%s %d [RESPONSE]: %s\n", time.Now().Format(time.RFC3339), os.Getpid(), string(response_raw))
                     break
                 case <-away_ticker.C:
                     kol.SubmitChat("/who", "clan")
@@ -477,6 +497,14 @@ func main() {
                     }
                     fmt.Println("Polling KoL had some error we are now ignoring: ", err)
                     continue
+                }
+
+                // Dumb heuristics!  If it contains msgs:[], it's an empty response,
+                // so don't log it... unless it also contains "output":, in which case
+                // there might be an error in there somewhere.
+                str_chat_response := string(raw_chat_response)
+                if !strings.Contains(str_chat_response, `"msgs":[]`) || strings.Contains(str_chat_response, `"output":`) {
+                    fmt.Fprintf(from_kol, "%s: %s\n", time.Now().Format(time.RFC3339), string(raw_chat_response))
                 }
 
                 chat_response, err := kol.DecodeChat(raw_chat_response)
