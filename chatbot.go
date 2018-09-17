@@ -382,6 +382,51 @@ func sanitize_message_for_kol (s *discordgo.Session, m *discordgo.MessageCreate)
     return author + ": " + encoded
 }
 
+func handle_message_from_discord(s *discordgo.Session, m *discordgo.MessageCreate, from_discord *os.File, discord_to_kol chan<- string) {
+    if m.Author.ID == s.State.User.ID {
+        // Ignore ourselves
+        return
+    }
+
+    if m.Author.Bot {
+        // Ignore other bots
+        // yes, I am hardcoding /baleet Odebot.  Take that!
+        return
+    }
+
+    if m.ChannelID != relay_bot_target_channel {
+        return // someone spoke in general, ignore
+    }
+
+    msg_as_json, _ := json.Marshal(m)
+    fmt.Fprintf(from_discord, "%s: %s\n", time.Now().Format(time.RFC3339), msg_as_json)
+
+    if m.Content == "" {
+        // Empty message
+        // We get here when someone sends a file/picture etc
+        // with no message body.  Just skip it.
+        return
+    }
+
+    if m.Content == "RelayBot, stfu" {
+        // We have been asked to quit it, so do!
+        global_stfu = true
+        return
+    }
+
+    if m.Content == "RelayBot, spam on" {
+        global_stfu = false
+        return
+    }
+
+    if global_stfu {
+        return // respect the desire for silence
+    }
+
+    message_for_kol := sanitize_message_for_kol(s, m)
+    discord_to_kol <- message_for_kol
+}
+
 func main() {
     initialize()
     discord_to_kol := make(chan string)
@@ -403,48 +448,7 @@ func main() {
 
     // Called when the bot sees a message on discord
     dg := open_discord_connection(func (s *discordgo.Session, m *discordgo.MessageCreate) {
-        if m.Author.ID == s.State.User.ID {
-            // Ignore ourselves
-            return
-        }
-
-        if m.Author.Bot {
-            // Ignore other bots
-            // yes, I am hardcoding /baleet Odebot.  Take that!
-            return
-        }
-
-        if m.ChannelID != relay_bot_target_channel {
-            return // someone spoke in general, ignore
-        }
-
-        msg_as_json, _ := json.Marshal(m)
-        fmt.Fprintf(from_discord, "%s: %s\n", time.Now().Format(time.RFC3339), msg_as_json)
-
-        if m.Content == "" {
-            // Empty message
-            // We get here when someone sends a file/picture etc
-            // with no message body.  Just skip it.
-            return
-        }
-
-        if m.Content == "RelayBot, stfu" {
-            // We have been asked to quit it, so do!
-            global_stfu = true
-            return
-        }
-
-        if m.Content == "RelayBot, spam on" {
-            global_stfu = false
-            return
-        }
-
-        if global_stfu {
-            return // respect the desire for silence
-        }
-
-        message_for_kol := sanitize_message_for_kol(s, m)
-        discord_to_kol <- message_for_kol
+        handle_message_from_discord(s, m, from_discord, discord_to_kol)
     })
     kol := NewKoL(relay_bot_username, relay_bot_password)
 
