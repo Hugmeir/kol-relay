@@ -455,7 +455,7 @@ func ComesFromDM(s *discordgo.Session, m *discordgo.MessageCreate) (bool, error)
     return channel.Type == discordgo.ChannelTypeDM, nil
 }
 
-var verifyRe *regexp.Regexp = regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?: ([0-9]{15,16})`)
+var verifyRe *regexp.Regexp = regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?: ([0-9]{10,})`)
 func HandleDM(s *discordgo.Session, m *discordgo.MessageCreate) {
     verifyMatches := verifyRe.FindStringSubmatch(m.Content)
     if len(verifyMatches) > 0 {
@@ -558,7 +558,7 @@ func HandleKoLDM(kol KoLRelay, message ChatMessage) {
         return
     }
 
-    verificationCode := fmt.Sprintf("%15d", rand.Intn(1000000000000000))
+    verificationCode := fmt.Sprintf("%15d", rand.Uint64())
     verificationsPending.Store("Code:" + verificationCode, message.Who.Name)
     verificationsPending.Store("User:" + message.Who.Name, verificationCode)
 
