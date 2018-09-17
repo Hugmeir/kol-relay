@@ -273,6 +273,10 @@ func (kol *relay) SubmitChat(destination string, message string) ([]byte, error)
         return nil, err
     }
 
+    //req.Header.Set("User-Agent",      "KoL-chat-to-Discord relay")
+    req.Header.Set("X-Asym-Culprit",  "Maintained by Hugmeir(#3061055)")
+    req.Header.Set("X-Asym-Reason",   "Uniting /clan and the clan Discord")
+    req.Header.Set("X-Asym-Source",   "https://github.com/Hugmeir/kol-relay")
     req.Header.Set("Accept-Encoding", "gzip")
     req.Header.Set("Refered",         "https://www.kingdomofloathing.com/mchat.php")
 
