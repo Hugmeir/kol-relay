@@ -321,7 +321,8 @@ func relay_to_discord(dg *discordgo.Session, message ChatMessage) {
         }
     }
 
-    cleaned_message = strings.Replace(cleaned_message, "`", "\\`", -1)
+    meta_characters := regexp.MustCompile("([\\\\`])")
+    cleaned_message = meta_characters.ReplaceAllString(cleaned_message, `\$1`)
 
     dg.ChannelMessageSend(relay_bot_target_channel, fmt.Sprintf("**%s**: `%s`", message.Who.Name, cleaned_message))
 }
