@@ -2,6 +2,7 @@ package main
 import (
     "os"
     "os/signal"
+    "sync"
     "strconv"
     "regexp"
     "fmt"
@@ -16,8 +17,11 @@ import (
     "bytes"
     "strings"
     "errors"
+    "math/rand"
     "encoding/json"
     "compress/gzip"
+    "database/sql"
+    _ "github.com/mattn/go-sqlite3"
     "github.com/bwmarrin/discordgo"
 )
 
@@ -93,7 +97,41 @@ var PASSWORD_HASH_PATTERNS []*regexp.Regexp = []*regexp.Regexp {
     regexp.MustCompile(`pwd = "([^"]+)"`),
 }
 
-func initialize() {
+var gameNameOverride sync.Map
+func init() {
+    rand.Seed(time.Now().UnixNano())
+
+    // Can we connect?
+    db, err := sql.Open("sqlite3", "./kol_relay.db")
+    if err != nil {
+        panic(err)
+    }
+    defer db.Close()
+    err = db.Ping()
+    if err != nil {
+        panic(err)
+    }
+    // Nice, sqlite works
+    rows, err := db.Query("SELECT discord_id, nickname FROM discord_name_override")
+    if err != nil {
+        panic(err)
+    }
+    defer rows.Close()
+    for rows.Next() {
+        var discordId string
+        var nickname   string
+        err = rows.Scan(&discordId, &nickname)
+        if err != nil {
+            fmt.Println(err)
+            continue
+        }
+        gameNameOverride.Store(discordId, nickname)
+    }
+    err = rows.Err()
+    if err != nil {
+        panic(err)
+    }
+
     contents, err := ioutil.ReadFile("config.json")
     if err != nil {
         panic(err)
@@ -162,7 +200,7 @@ type KoLPlayer struct {
 }
 type ChatMessage struct {
     Msg          string    `json:"msg"`
-    Type         interface{}    `json:"type"`
+    Type         string    `json:"type"`
     Mid          interface{}    `json:"mid"`
     Who          KoLPlayer `json:"who"`
     Format       interface{}    `json:"format"`
@@ -339,6 +377,19 @@ func NewDiscordConnection() *discordgo.Session {
 }
 
 func ResolveNickname(s *discordgo.Session, m *discordgo.MessageCreate) string {
+    id := m.Author.ID
+
+    result, ok := gameNameOverride.Load(id)
+    if ok {
+        return result.(string)
+    }
+
+    // TODO: worth checking if nickname != username and spamming?
+
+    return m.Author.Username
+}
+
+/*
     c, err := s.Channel(m.ChannelID)
     if err != nil {
         return m.Author.Username
@@ -354,6 +405,11 @@ func ResolveNickname(s *discordgo.Session, m *discordgo.MessageCreate) string {
             continue;
         }
         if member.Nick != "" {
+            nick := member.Nick
+            if nick == m.Author.Username {
+                return nick
+            }
+            // Only return nickna
             return member.Nick
         }
         break;
@@ -361,11 +417,11 @@ func ResolveNickname(s *discordgo.Session, m *discordgo.MessageCreate) string {
 
     return m.Author.Username // fallback
 }
+*/
 
 // This should be [\p{Latin1}\p{ASCII}], but no such thing in golang
 var non_latin_1_re *regexp.Regexp = regexp.MustCompile(`[^\x00-\xff]`)
 func sanitize_message_for_kol (s *discordgo.Session, m *discordgo.MessageCreate) string {
-    author  := ResolveNickname(s, m)
     content := m.Content
 
     // KoL chat only accepts the latin1 range:
@@ -378,7 +434,133 @@ func sanitize_message_for_kol (s *discordgo.Session, m *discordgo.MessageCreate)
         encoded = content
     }
 
-    return author + ": " + encoded
+    return encoded
+}
+
+func ComesFromDM(s *discordgo.Session, m *discordgo.MessageCreate) (bool, error) {
+    channel, err := s.State.Channel(m.ChannelID)
+    if err != nil {
+        if channel, err = s.Channel(m.ChannelID); err != nil {
+            return false, err
+        }
+    }
+
+    return channel.Type == discordgo.ChannelTypeDM, nil
+}
+
+var verifyRe *regexp.Regexp = regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?: ([0-9]{15,16})`)
+func HandleDM(s *discordgo.Session, m *discordgo.MessageCreate) {
+    verifyMatches := verifyRe.FindStringSubmatch(m.Content)
+    if len(verifyMatches) > 0 {
+        HandleVerification(s, m, verifyMatches[1])
+    } else {
+        s.ChannelMessageSend(m.ChannelID, "<some funny message about not understanding what you mean>");
+    }
+}
+
+var sqliteInsert sync.Mutex
+func InsertNewNickname(discordId string, nick string) {
+    sqliteInsert.Lock()
+    defer sqliteInsert.Unlock()
+    db, err := sql.Open("sqlite3", "./kol_relay.db")
+    if err != nil {
+        fmt.Println("Had an error opening kol_relay.db")
+        return
+    }
+    defer db.Close()
+
+    now := time.Now().Format(time.RFC3339)
+    stmt, err := db.Prepare("update discord_name_override set nickname=?, row_updated_at=? WHERE discord_id=?")
+    if err != nil {
+        fmt.Println("Entirely saved to save details for ", discordId, nick)
+        return
+    }
+    defer stmt.Close()
+    res, err := stmt.Exec(nick, now, discordId)
+    if err != nil {
+        affected, _ := res.RowsAffected()
+        if affected > 0 {
+            // This was an update!
+            return
+        }
+    }
+
+    stmt, err = db.Prepare("insert into discord_name_override (`discord_id`, `nickname`, `row_created_at`, `row_updated_at`) values (?, ?, ?, ?)")
+    if err != nil {
+        fmt.Println("Entirely saved to save details for ", discordId, nick)
+        return
+    }
+    defer stmt.Close()
+    res, err = stmt.Exec(discordId, nick, now, now)
+    if err != nil {
+        fmt.Println("Entirely saved to save details for ", discordId, nick)
+    }
+
+    affected, _ := res.RowsAffected()
+    if affected < 1 {
+        fmt.Println("Entirely saved to save details for ", discordId, nick)
+    }
+}
+
+var verificationsPending sync.Map
+func HandleVerification(s *discordgo.Session, m *discordgo.MessageCreate, verificationCode string) {
+    result, ok := verificationsPending.Load("Code:" + verificationCode)
+    if ok {
+        // Insert in the db:
+        InsertNewNickname(m.Author.ID, result.(string))
+        // Put in our in-memory hash:
+        gameNameOverride.Store(m.Author.ID, result.(string))
+        // Let 'em know:
+        s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("That's you alright!  I'll call you %s from now on", result.(string)))
+    } else {
+        // Hmm...
+        s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Incorrect verification code: '%s'", verificationCode))
+    }
+}
+
+func IsKoLDM(message ChatMessage) bool {
+    if message.Type == "private" {
+        return true
+    }
+    return false
+}
+
+var firstVerifyRe *regexp.Regexp = regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?!?`)
+func HandleKoLDM(kol KoLRelay, message ChatMessage) {
+    if !firstVerifyRe.MatchString(message.Msg) {
+        return
+    }
+
+    sender := message.Who
+    var senderId string
+    switch sender.Id.(type) {
+        case string:
+            senderId, _ = sender.Id.(string)
+            break
+        case int64:
+            senderId = strconv.FormatInt(sender.Id.(int64), 10)
+            break
+        case float64:
+            senderId = strconv.FormatInt(int64(sender.Id.(float64)), 10)
+            break
+    }
+
+    _, ok := verificationsPending.Load("User:" + message.Who.Name);
+    if ok {
+        kol.SubmitChat("/msg " + senderId, "Already sent you a code, you must wait 5 minutes to generate a new one")
+        return
+    }
+
+    verificationCode := fmt.Sprintf("%15d", rand.Intn(1000000000000000))
+    verificationsPending.Store("Code:" + verificationCode, message.Who.Name)
+    verificationsPending.Store("User:" + message.Who.Name, verificationCode)
+
+    kol.SubmitChat("/msg " + senderId, "In Discord, send me a private message saying \"Verify me: " + verificationCode + "\", without the quotes.  This will expire in 5 minutes")
+    go func() {
+        time.Sleep(5 * time.Minute)
+        verificationsPending.Delete("Code:" + verificationCode)
+        verificationsPending.Delete("User:" + message.Who.Name)
+    }()
 }
 
 func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, fromDiscord *os.File, discordToKoL chan<- string) {
@@ -394,6 +576,10 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
     }
 
     if m.ChannelID != relay_bot_target_channel {
+        dm, _ := ComesFromDM(s, m)
+        if dm {
+            HandleDM(s, m)
+        }
         return // someone spoke in general, ignore
     }
 
@@ -422,12 +608,12 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
         return // respect the desire for silence
     }
 
+    author    := ResolveNickname(s, m)
     msgForKoL := sanitize_message_for_kol(s, m)
-    discordToKoL <- msgForKoL
+    discordToKoL <- author + ": " + msgForKoL
 }
 
 func main() {
-    initialize()
     discordToKoL := make(chan string)
 
     from_discord_logfile := "/var/log/kol-relay/from_discord.log"
@@ -535,6 +721,12 @@ func main() {
                     }
 
                     if sender_id == kol.PlayerId() {
+                        continue
+                    }
+
+                    isKoLDM := IsKoLDM(message)
+                    if isKoLDM {
+                        HandleKoLDM(kol, message)
                         continue
                     }
 
