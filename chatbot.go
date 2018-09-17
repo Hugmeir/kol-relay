@@ -265,8 +265,8 @@ func (kol *relay)DecodeChat(json_chat []byte) (*ChatResponse, error) {
 }
 
 func (kol *relay) SubmitChat(destination string, message string) ([]byte, error) {
-    httpClient := kol.HttpClient
-    msg         := destination + " " + url.QueryEscape(message)
+    httpClient  := kol.HttpClient
+    msg         := destination + url.QueryEscape(" " + message)
     final_url   := fmt.Sprintf("%s?playerid=%d&pwd=%s&j=1&graf=%s", submit_message_url, kol.playerId, kol.PasswordHash, msg)
     req, err := http.NewRequest("POST", final_url, nil)
     if err != nil {
@@ -295,6 +295,10 @@ func (kol *relay) SubmitChat(destination string, message string) ([]byte, error)
         if err != nil {
             return nil, err
         }
+    }
+
+    if resp.StatusCode != 200 {
+        fmt.Println("Got a non-200?!", resp.Header, string(body))
     }
 
     return body, nil
@@ -425,8 +429,7 @@ func ResolveNickname(s *discordgo.Session, m *discordgo.MessageCreate) string {
 
 // This should be [\p{Latin1}\p{ASCII}], but no such thing in golang
 var non_latin_1_re *regexp.Regexp = regexp.MustCompile(`[^\x00-\xff]`)
-func sanitize_message_for_kol (s *discordgo.Session, m *discordgo.MessageCreate) string {
-    content := m.Content
+func sanitize_message_for_kol (content string) string {
 
     // KoL chat only accepts the latin1 range:
     content = non_latin_1_re.ReplaceAllString(content, ``)
@@ -612,9 +615,23 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
         return // respect the desire for silence
     }
 
-    author    := ResolveNickname(s, m)
-    msgForKoL := sanitize_message_for_kol(s, m)
-    discordToKoL <- author + ": " + msgForKoL
+
+    author    := sanitize_message_for_kol(ResolveNickname(s, m))
+    msgForKoL := sanitize_message_for_kol(m.Content)
+    finalMsg  := author + ": " + msgForKoL
+    if len(finalMsg) > 200 {
+        // Hm..
+        if len(finalMsg + author) < 300 {
+            // Just split it
+            discordToKoL <- finalMsg[:150] + "..."
+            discordToKoL <- author + ": ..." + finalMsg[150:]
+            return
+        }
+        // Too long!
+        s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Brevity is the soul of wit, %s.  That message was too long, so it will not get relayed.", author))
+        return
+    }
+    discordToKoL <- finalMsg
 }
 
 func main() {
