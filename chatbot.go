@@ -588,11 +588,45 @@ func HandleKoLDM(kol KoLRelay, message ChatMessage) {
     }()
 }
 
+type triggerTuple struct {
+    re *regexp.Regexp
+    cb func(*discordgo.Session, *discordgo.MessageCreate, []string)
+}
+
+var bullshitTriggers = []triggerTuple {
+    triggerTuple {
+        regexp.MustCompile(`(?i)/whois\s+hugmeir`),
+        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
+            if m.Author.Username == "hugmeir" {
+                return
+            }
+            s.ChannelMessageSend(m.ChannelID, "Ssh! Don't summon the accursed creator!")
+        },
+    },
+    triggerTuple {
+        regexp.MustCompile(`(?i)^\s*RelayBot,?\s+tell\s+me\s+about\s+(.+)`),
+        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
+            about := matches[1]
+            if strings.Contains(about, "IO ERROR") {
+                s.ChannelMessageSend(m.ChannelID, "Still doing that, are you?  You'll want to talk to one of _those_ other bots")
+            } else if strings.Contains(about, "verification") {
+                s.ChannelMessageSend(m.ChannelID, "The relay uses your discord username.  To make it use your in-game name, `/msg RelayBot Verify` in-game and follow the instructions")
+            }
+        },
+    },
+}
+
 func RandomBullshit(s *discordgo.Session, m *discordgo.MessageCreate ) {
     content := m.Content
-    re := regexp.MustCompile(`(?i)/whois\s+hugmeir`)
-    if re.MatchString(content) && m.Author.Username != "hugmeir" {
-        s.ChannelMessageSend(m.ChannelID, "Ssh! Don't summon the accursed creator!")
+
+    for _, trigger := range bullshitTriggers {
+        re      := trigger.re
+        matches := re.FindStringSubmatch(content)
+        if len(matches) == 0 {
+            continue
+        }
+        trigger.cb(s, m, matches)
+        return
     }
 }
 
