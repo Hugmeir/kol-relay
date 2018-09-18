@@ -41,6 +41,7 @@ type KoLRelay interface {
     SubmitChat(string, string) ([]byte, error)
     PollChat()                 ([]byte, error)
     DecodeChat([]byte)         (*ChatResponse, error)
+    HandleKoLException(error)  error
     PlayerId() int64
 }
 
@@ -170,7 +171,7 @@ func (kol *relay) LogIn(password string) error {
     }
     defer resp.Body.Close()
 
-    //body, _ := ioutil.ReadAll(resp.Body)
+    body, _ := ioutil.ReadAll(resp.Body)
     for _, cookie := range httpClient.Jar.Cookies(req.URL) {
         if strings.EqualFold(cookie.Name, "PHPSESSID") {
             kol.SessionId = cookie.Value
@@ -181,6 +182,13 @@ func (kol *relay) LogIn(password string) error {
         return errors.New("Failed to aquire session id")
     }
 
+    responseErr := CheckResponseForErrors(resp, body)
+    if responseErr != nil {
+        return responseErr
+    }
+
+    // Looks like we logged in successfuly.  Try to get the pwd hash
+    // and player ID
     err = kol.ResolveCharacterData()
     if err != nil {
         return err
@@ -206,7 +214,7 @@ func (kol *relay) LogOut() ([]byte, error) {
     defer resp.Body.Close()
 
     body, _ := ioutil.ReadAll(resp.Body)
-    return body, nil
+    return body, CheckResponseForErrors(resp, body)
 }
 
 // {"msgs":[],"last":"1468191607","delay":3000}
@@ -259,7 +267,7 @@ func (kol *relay) PollChat() ([]byte, error) {
         }
     }
 
-    return body, nil
+    return body, CheckResponseForErrors(resp, body)
 }
 
 func (kol *relay)DecodeChat(jsonChat []byte) (*ChatResponse, error) {
@@ -280,6 +288,24 @@ func (kol *relay)DecodeChat(jsonChat []byte) (*ChatResponse, error) {
     }
 
     return &jsonResponse, nil
+}
+
+const (
+    Disconnect = iota
+    Rollover
+    BadRequest
+    ServerError
+    Unknown
+)
+
+type KoLError struct {
+    ResponseBody []byte
+    ErrorMsg     string
+    ErrorType    int
+}
+
+func (error *KoLError) Error() string {
+    return error.ErrorMsg
 }
 
 func (kol *relay) SubmitChat(destination string, message string) ([]byte, error) {
@@ -315,11 +341,48 @@ func (kol *relay) SubmitChat(destination string, message string) ([]byte, error)
         }
     }
 
-    if resp.StatusCode != 200 {
-        fmt.Println("Got a non-200?!", resp.Header, string(body))
+    return body, CheckResponseForErrors(resp, body)
+}
+
+func CheckResponseForErrors(resp *http.Response, body []byte) error {
+    if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+        return &KoLError {
+            body,
+            fmt.Sprintf("KoL returned a %d; our request was broken somehow", resp.StatusCode),
+            BadRequest,
+        }
+    } else if resp.StatusCode >= 500 {
+        return &KoLError {
+            body,
+            fmt.Sprintf("KoL returned a %d; game is broken!", resp.StatusCode),
+            ServerError,
+        }
+    } else if resp.StatusCode >= 300 {
+        return &KoLError {
+            body,
+            fmt.Sprintf("KoL returned a %d; redirect spiral?!", resp.StatusCode),
+            ServerError,
+        }
     }
 
-    return body, nil
+    // So this was a 200.  Check where we ended up:
+    finalURL := resp.Request.URL.String()
+    if strings.Contains(finalURL, "login.php") {
+        // Got redirected to login.php!  That means we were disconnected.
+        return &KoLError{
+            body,
+            "Redirected to login.php when submiting a message, looks like we got disconnected",
+            Disconnect,
+        }
+    } else if strings.Contains(finalURL, "maint.php") {
+        return &KoLError{
+            body,
+            "Rollover",
+            Rollover,
+        }
+    }
+
+    return nil
 }
 
 func (kol *relay) queryLChat() ([]byte, error) {
@@ -334,27 +397,32 @@ func (kol *relay) queryLChat() ([]byte, error) {
         return nil, err
     }
     defer resp.Body.Close()
-    bodyBytes, _ := ioutil.ReadAll(resp.Body)
-    return bodyBytes, nil
+    body, _ := ioutil.ReadAll(resp.Body)
+    return body, CheckResponseForErrors(resp, body)
 }
 
 func (kol *relay) ResolveCharacterData() error {
     bodyBytes, err := kol.queryLChat()
     if err != nil {
-        fmt.Println("Cannot resolve pwd hash")
-        panic(err)
+        return err
     }
     body := string(bodyBytes)
 
+    kol.PasswordHash = ""
     for _, pattern := range passwordHashPatterns {
         match := pattern.FindStringSubmatch(body)
         if match != nil && len(match) > 0 {
             kol.PasswordHash = string(match[1])
-            return nil
+            break
         }
     }
 
-    return errors.New("Cannot find password hash?!")
+    if kol.PasswordHash == "" {
+        return errors.New("Cannot find password hash?!")
+    }
+
+    // TODO: get player ID here
+    return nil
 }
 
 var globalStfu bool = false
@@ -695,6 +763,40 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
     discordToKoL <- finalMsg
 }
 
+func (kol *relay)HandleKoLException(err error) error {
+    if err == nil {
+        return nil
+    }
+
+    kolError, ok := err.(*KoLError)
+    if !ok {
+        return err
+    }
+
+    if kolError.ErrorType == Rollover {
+        fmt.Println("Looks like we are in rollover.  Just shut down.")
+        return err
+    } else if kolError.ErrorType == Disconnect {
+        fmt.Println("Looks like we were disconnected.  Try to reconnect!")
+        err = kol.LogIn(relay_bot_password)
+        if err != nil {
+            return err
+        }
+    } else if kolError.ErrorType == BadRequest {
+        // Weird.  Just log it.
+        fmt.Println("Exception due to bad request.  Logging it and ignoring it: ", kolError)
+        return nil
+    } else if kolError.ErrorType == ServerError {
+        // Weird.  Just log it.
+        fmt.Println("Server is having a bad time.  Logging it and ignoring it: ", kolError)
+        return nil
+    } else { // Some other error
+        return err
+    }
+
+    return nil
+}
+
 func main() {
     discordToKoL := make(chan string)
 
@@ -748,13 +850,27 @@ func main() {
                     awaitTicker = time.NewTicker(3*time.Minute)
                     responseRaw, err := kol.SubmitChat("/clan", msg)
                     if err != nil {
-                        fmt.Println("Got an error submitting to kol?!")
-                        continue
+                        fatalError := kol.HandleKoLException(err)
+                        if fatalError != nil {
+                            fmt.Println("Got an error submitting to kol?!")
+                            panic(fatalError)
+                        }
+
+                        // Exception was handled, so retry:
+                        responseRaw, err = kol.SubmitChat("/clan", msg)
+                        if err != nil {
+                            // Well, we tried, silver star.  Die:
+                            panic(err)
+                        }
                     }
                     fmt.Fprintf(fromKoL, "%s %d [RESPONSE]: %s\n", time.Now().Format(time.RFC3339), os.Getpid(), string(responseRaw))
                     break
                 case <-awaitTicker.C:
-                    kol.SubmitChat("/who", "clan")
+                    _, err := kol.SubmitChat("/who", "clan")
+                    fatalError := kol.HandleKoLException(err)
+                    if fatalError != nil {
+                        panic(fatalError)
+                    }
                     break
             }
         }
@@ -767,11 +883,10 @@ func main() {
             case <-ticker.C:
                 rawChatReponse, err := kol.PollChat()
                 if err != nil {
-                    // Might as well assume that we git disconnected
-                    err = kol.LogIn(relay_bot_password)
-                    if err != nil {
+                    fatalError      := kol.HandleKoLException(err)
+                    if fatalError != nil {
                         // Probably rollover?
-                        panic(err)
+                        panic(fatalError)
                     }
                     fmt.Println("Polling KoL had some error we are now ignoring: ", err)
                     continue
@@ -787,7 +902,8 @@ func main() {
 
                 chatResponses, err := kol.DecodeChat(rawChatReponse)
                 if err != nil {
-                    panic(err)
+                    fmt.Println("Could not decode chat from KoL, ignoring it for now ", err)
+                    continue
                 }
 
                 for i := 0; i < len(chatResponses.Msgs); i++ {
