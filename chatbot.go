@@ -25,10 +25,11 @@ import (
     "github.com/bwmarrin/discordgo"
 )
 
-var base_url           string = "https://www.kingdomofloathing.com/"
-var login_url          string = base_url + "login.php"
-var new_message_url    string = base_url + "newchatmessages.php"
-var submit_message_url string = base_url + "submitnewchat.php"
+const baseUrl          = "https://www.kingdomofloathing.com/"
+const loginUrl         = baseUrl + "login.php"
+const newMessageUrl    = baseUrl + "newchatmessages.php"
+const submitMessageUrl = baseUrl + "submitnewchat.php"
+const lChatUrl         = baseUrl + "lchat.php"
 
 // TODO: mprotect / mlock this sucker and put it inside the KoL interface
 var kol_password string
@@ -91,7 +92,7 @@ var relay_bot_password       string
 var relay_bot_discord_key    string
 var relay_bot_target_channel string
 
-var PASSWORD_HASH_PATTERNS []*regexp.Regexp = []*regexp.Regexp {
+var passwordHashPatterns []*regexp.Regexp = []*regexp.Regexp {
     regexp.MustCompile(`name=["']?pwd["']? value=["']([^"']+)["']`),
     regexp.MustCompile(`pwd=([^&]+)`),
     regexp.MustCompile(`pwd = "([^"]+)"`),
@@ -152,15 +153,15 @@ func init() {
 func (kol *relay) LogIn(password string) error {
     httpClient := kol.HttpClient
 
-    login_params := url.Values{}
-    login_params.Set("loggingin",    "Yup.")
-    login_params.Set("loginname",    kol.UserName)
-    login_params.Set("password",     kol_password)
-    login_params.Set("secure",       "0")
-    login_params.Set("submitbutton", "Log In")
+    loginParams := url.Values{}
+    loginParams.Set("loggingin",    "Yup.")
+    loginParams.Set("loginname",    kol.UserName)
+    loginParams.Set("password",     kol_password)
+    loginParams.Set("secure",       "0")
+    loginParams.Set("submitbutton", "Log In")
 
-    login_body := strings.NewReader(login_params.Encode())
-    req, err := http.NewRequest("POST", login_url, login_body)
+    loginBody := strings.NewReader(loginParams.Encode())
+    req, err := http.NewRequest("POST", loginUrl, loginBody)
     if err != nil {
         return err
     }
@@ -216,7 +217,7 @@ type ChatResponse struct {
 
 func (kol *relay) PollChat() ([]byte, error) {
     httpClient := kol.HttpClient
-    req, err := http.NewRequest("GET", fmt.Sprintf("%s?lasttime=%s&j=1", new_message_url, kol.LastSeen), nil)
+    req, err := http.NewRequest("GET", fmt.Sprintf("%s?lasttime=%s&j=1", newMessageUrl, kol.LastSeen), nil)
     if err != nil {
         return nil, err
     }
@@ -244,31 +245,31 @@ func (kol *relay) PollChat() ([]byte, error) {
     return body, nil
 }
 
-func (kol *relay)DecodeChat(json_chat []byte) (*ChatResponse, error) {
-    var json_response ChatResponse
-    err := json.Unmarshal(json_chat, &json_response)
+func (kol *relay)DecodeChat(jsonChat []byte) (*ChatResponse, error) {
+    var jsonResponse ChatResponse
+    err := json.Unmarshal(jsonChat, &jsonResponse)
     if err != nil {
-        fmt.Println("The body that broke us: ", string(json_chat))
+        fmt.Println("The body that broke us: ", string(jsonChat))
         return nil, err
     }
 
-    switch json_response.Last.(type) {
+    switch jsonResponse.Last.(type) {
         case string:
-            kol.LastSeen = json_response.Last.(string)
+            kol.LastSeen = jsonResponse.Last.(string)
             break
         case float64:
-            kol.LastSeen = fmt.Sprintf("%v", json_response.Last)
+            kol.LastSeen = fmt.Sprintf("%v", jsonResponse.Last)
             break
     }
 
-    return &json_response, nil
+    return &jsonResponse, nil
 }
 
 func (kol *relay) SubmitChat(destination string, message string) ([]byte, error) {
     httpClient  := kol.HttpClient
     msg         := destination + url.QueryEscape(" " + message)
-    final_url   := fmt.Sprintf("%s?playerid=%d&pwd=%s&j=1&graf=%s", submit_message_url, kol.playerId, kol.PasswordHash, msg)
-    req, err := http.NewRequest("POST", final_url, nil)
+    finalUrl   := fmt.Sprintf("%s?playerid=%d&pwd=%s&j=1&graf=%s", submitMessageUrl, kol.playerId, kol.PasswordHash, msg)
+    req, err := http.NewRequest("POST", finalUrl, nil)
     if err != nil {
         return nil, err
     }
@@ -306,7 +307,7 @@ func (kol *relay) SubmitChat(destination string, message string) ([]byte, error)
 
 func (kol *relay) queryLChat() ([]byte, error) {
     httpClient := kol.HttpClient
-    req, err    := http.NewRequest("GET", base_url + "lchat.php", nil)
+    req, err    := http.NewRequest("GET", lChatUrl, nil)
     if err != nil {
         return nil, err
     }
@@ -328,7 +329,7 @@ func (kol *relay) ResolveCharacterData() error {
     }
     body := string(bodyBytes)
 
-    for _, pattern := range PASSWORD_HASH_PATTERNS {
+    for _, pattern := range passwordHashPatterns {
         match := pattern.FindStringSubmatch(body)
         if match != nil && len(match) > 0 {
             kol.PasswordHash = string(match[1])
@@ -339,10 +340,10 @@ func (kol *relay) ResolveCharacterData() error {
     return errors.New("Cannot find password hash?!")
 }
 
-var global_stfu bool = false
+var globalStfu bool = false
 var metaRegexp *regexp.Regexp = regexp.MustCompile("([\\\\`])")
 func RelayToDiscord(dg *discordgo.Session, message ChatMessage) {
-    if global_stfu {
+    if globalStfu {
         return
     }
     if !strings.Contains(message.Channel, "clan") {
@@ -428,11 +429,11 @@ func ResolveNickname(s *discordgo.Session, m *discordgo.MessageCreate) string {
 */
 
 // This should be [\p{Latin1}\p{ASCII}], but no such thing in golang
-var non_latin_1_re *regexp.Regexp = regexp.MustCompile(`[^\x00-\xff]`)
-func sanitize_message_for_kol (content string) string {
+var nonLatin1Re *regexp.Regexp = regexp.MustCompile(`[^\x00-\xff]`)
+func sanitizeForKoL (content string) string {
 
     // KoL chat only accepts the latin1 range:
-    content = non_latin_1_re.ReplaceAllString(content, ``)
+    content = nonLatin1Re.ReplaceAllString(content, ``)
 
     // KoL chat only accepts latin1, so encode before sending:
     encoded, err := charmap.ISO8859_1.NewEncoder().String(content)
@@ -610,23 +611,23 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
 
     if m.Content == "RelayBot, stfu" {
         // We have been asked to quit it, so do!
-        global_stfu = true
+        globalStfu = true
         return
     }
 
     if m.Content == "RelayBot, spam on" {
-        global_stfu = false
+        globalStfu = false
         return
     }
 
-    if global_stfu {
+    if globalStfu {
         return // respect the desire for silence
     }
 
     go RandomBullshit(s, m)
 
-    author    := sanitize_message_for_kol(ResolveNickname(s, m))
-    msgForKoL := sanitize_message_for_kol(m.Content)
+    author    := sanitizeForKoL(ResolveNickname(s, m))
+    msgForKoL := sanitizeForKoL(m.Content)
     finalMsg  := author + ": " + msgForKoL
     if len(finalMsg) > 200 {
         // Hm..
@@ -646,16 +647,16 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
 func main() {
     discordToKoL := make(chan string)
 
-    from_discord_logfile := "/var/log/kol-relay/from_discord.log"
-    from_kol_logfile     := "/var/log/kol-relay/from_kol.log"
+    fromDiscordLogfile := "/var/log/kol-relay/from_discord.log"
+    fromKoLLogfile     := "/var/log/kol-relay/from_kol.log"
 
-    fromDiscord, err := os.OpenFile(from_discord_logfile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+    fromDiscord, err := os.OpenFile(fromDiscordLogfile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
     if err != nil {
         panic(err)
     }
     defer fromDiscord.Close()
 
-    fromKoL, err := os.OpenFile(from_kol_logfile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+    fromKoL, err := os.OpenFile(fromKoLLogfile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
     if err != nil {
         panic(err)
     }
@@ -673,8 +674,8 @@ func main() {
     ticker := time.NewTicker(3*time.Second)
     defer ticker.Stop()
 
-    away_ticker := time.NewTicker(3*time.Minute)
-    defer away_ticker.Stop()
+    awaitTicker := time.NewTicker(3*time.Minute)
+    defer awaitTicker.Stop()
 
     go func() {
         responseRaw, err := kol.SubmitChat("/msg hugmeir", "oh hai creator")
@@ -688,8 +689,8 @@ func main() {
             select {
                 case msg := <-discordToKoL:
                     // First, disarm the away ticker and re-arm it:
-                    away_ticker.Stop()
-                    away_ticker = time.NewTicker(3*time.Minute)
+                    awaitTicker.Stop()
+                    awaitTicker = time.NewTicker(3*time.Minute)
                     responseRaw, err := kol.SubmitChat("/clan", msg)
                     if err != nil {
                         fmt.Println("Got an error submitting to kol?!")
@@ -697,7 +698,7 @@ func main() {
                     }
                     fmt.Fprintf(fromKoL, "%s %d [RESPONSE]: %s\n", time.Now().Format(time.RFC3339), os.Getpid(), string(responseRaw))
                     break
-                case <-away_ticker.C:
+                case <-awaitTicker.C:
                     kol.SubmitChat("/who", "clan")
                     break
             }
@@ -724,38 +725,37 @@ func main() {
                 // Dumb heuristics!  If it contains msgs:[], it's an empty response,
                 // so don't log it... unless it also contains "output":, in which case
                 // there might be an error in there somewhere.
-                str_chat_response := string(rawChatReponse)
-                if !strings.Contains(str_chat_response, `"msgs":[]`) || strings.Contains(str_chat_response, `"output":`) {
+                chatReponseString := string(rawChatReponse)
+                if !strings.Contains(chatReponseString, `"msgs":[]`) || strings.Contains(chatReponseString, `"output":`) {
                     fmt.Fprintf(fromKoL, "%s: %s\n", time.Now().Format(time.RFC3339), string(rawChatReponse))
                 }
 
-                chat_response, err := kol.DecodeChat(rawChatReponse)
+                chatResponses, err := kol.DecodeChat(rawChatReponse)
                 if err != nil {
                     panic(err)
                 }
 
-                for i := 0; i < len(chat_response.Msgs); i++ {
-                    message := chat_response.Msgs[i]
+                for i := 0; i < len(chatResponses.Msgs); i++ {
+                    message := chatResponses.Msgs[i]
                     sender := message.Who
-                    var sender_id int64
+                    var senderId int64
                     switch sender.Id.(type) {
                         case string:
-                            sender_id, _ = strconv.ParseInt(sender.Id.(string), 10, 64)
+                            senderId, _ = strconv.ParseInt(sender.Id.(string), 10, 64)
                             break
                         case int64:
-                            sender_id = sender.Id.(int64)
+                            senderId = sender.Id.(int64)
                             break
                         case float64:
-                            sender_id = int64(sender.Id.(float64))
+                            senderId = int64(sender.Id.(float64))
                             break
                     }
 
-                    if sender_id == kol.PlayerId() {
+                    if senderId == kol.PlayerId() {
                         continue
                     }
 
-                    isKoLDM := IsKoLDM(message)
-                    if isKoLDM {
+                    if IsKoLDM(message) {
                         HandleKoLDM(kol, message)
                         continue
                     }
