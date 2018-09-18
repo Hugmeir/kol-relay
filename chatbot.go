@@ -32,6 +32,7 @@ const (
     newMessageUrl    = baseUrl + "newchatmessages.php"
     submitMessageUrl = baseUrl + "submitnewchat.php"
     lChatUrl         = baseUrl + "lchat.php"
+    uneffectUrl      = baseUrl + "uneffect.php"
 )
 
 // TODO: mprotect / mlock this sucker and put it inside the KoL interface
@@ -40,6 +41,7 @@ type KoLRelay interface {
     LogOut()                   ([]byte, error)
     SubmitChat(string, string) ([]byte, error)
     PollChat()                 ([]byte, error)
+    Uneffect(string)           ([]byte, error)
     DecodeChat([]byte)         (*ChatResponse, error)
     HandleKoLException(error)  error
     PlayerId() int64
@@ -385,6 +387,35 @@ func CheckResponseForErrors(resp *http.Response, body []byte) error {
     return nil
 }
 
+/*
+using:Yep.
+pwd:6e7d95baa4a6a6d3cd1fb8ac6d1c82a6
+whicheffect:54
+*/
+func (kol *relay)Uneffect(effectId string) ([]byte, error) {
+    httpClient := kol.HttpClient
+
+    params := url.Values{}
+    params.Set("using",       "Yup.")
+    params.Set("pwd",         kol.PasswordHash)
+    params.Set("whicheffect", effectId)
+
+    paramsBody := strings.NewReader(params.Encode())
+    req, err   := http.NewRequest("POST", uneffectUrl, paramsBody)
+    if err != nil {
+        return nil, err
+    }
+    req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    resp, err := httpClient.Do(req)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
+    body, _ := ioutil.ReadAll(resp.Body)
+    return body, CheckResponseForErrors(resp, body)
+}
+
 func (kol *relay) queryLChat() ([]byte, error) {
     httpClient := kol.HttpClient
     req, err    := http.NewRequest("GET", lChatUrl, nil)
@@ -427,12 +458,16 @@ func (kol *relay) ResolveCharacterData() error {
 
 var globalStfu bool = false
 var metaRegexp *regexp.Regexp = regexp.MustCompile("([\\\\`])")
-func RelayToDiscord(dg *discordgo.Session, destChannel string, message ChatMessage) {
+func RelayToDiscord(dg *discordgo.Session, destChannel string, toDiscord string) {
     if globalStfu {
         return
     }
+    dg.ChannelMessageSend(destChannel, toDiscord)
+}
+
+func HandleKoLPublicMessage(kol KoLRelay, message ChatMessage) (string, error) {
     if !strings.Contains(message.Channel, "clan") {
-        return
+        return "", nil
     }
 
     rawMessage     := message.Msg;
@@ -456,7 +491,7 @@ func RelayToDiscord(dg *discordgo.Session, destChannel string, message ChatMessa
 
     cleanedMessage = metaRegexp.ReplaceAllString(cleanedMessage, `\$1`)
 
-    dg.ChannelMessageSend(destChannel, fmt.Sprintf("**%s**: `%s`", message.Who.Name, cleanedMessage))
+    return fmt.Sprintf("**%s**: `%s`", message.Who.Name, cleanedMessage), nil
 }
 
 func NewDiscordConnection(botAPIKey string) *discordgo.Session {
@@ -618,12 +653,14 @@ func IsKoLDM(message ChatMessage) bool {
     return false
 }
 
-var firstVerifyRe *regexp.Regexp = regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?!?`)
-func HandleKoLDM(kol KoLRelay, message ChatMessage) {
-    if !firstVerifyRe.MatchString(message.Msg) {
-        return
+func IsKoLEvent(message ChatMessage) bool {
+    if message.Type == "event" {
+        return true
     }
+    return false
+}
 
+func SenderIdFromMessage(message ChatMessage) string {
     sender := message.Who
     var senderId string
     switch sender.Id.(type) {
@@ -637,11 +674,21 @@ func HandleKoLDM(kol KoLRelay, message ChatMessage) {
             senderId = strconv.FormatInt(int64(sender.Id.(float64)), 10)
             break
     }
+    return senderId
+}
+
+var firstVerifyRe *regexp.Regexp = regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?!?`)
+func HandleKoLDM(kol KoLRelay, message ChatMessage) (string, error) {
+    if !firstVerifyRe.MatchString(message.Msg) {
+        return "", nil
+    }
+
+    senderId := SenderIdFromMessage(message)
 
     _, ok := verificationsPending.Load("User:" + message.Who.Name);
     if ok {
         kol.SubmitChat("/msg " + senderId, "Already sent you a code, you must wait 5 minutes to generate a new one")
-        return
+        return "", nil
     }
 
     verificationCode := fmt.Sprintf("%15d", rand.Uint64())
@@ -654,6 +701,51 @@ func HandleKoLDM(kol KoLRelay, message ChatMessage) {
         verificationsPending.Delete("Code:" + verificationCode)
         verificationsPending.Delete("User:" + message.Who.Name)
     }()
+
+    return "", nil
+}
+
+func UneffectSuccessful(body []byte) bool {
+    bod := string(body)
+    if strings.Contains(bod, "Effect removed.") {
+        return true
+    }
+    if strings.Contains(bod, "Bruised Jaw (") {
+        fmt.Println("UNEFFECT FAILED: ", string(body))
+        return false
+    }
+    // Turns out we never had it!
+    return true
+}
+
+const bruisedJaw = 697
+func ClearJawBruiser(kol KoLRelay) (bool, error) {
+    body, err := kol.Uneffect(strconv.Itoa(bruisedJaw))
+    if err != nil {
+        return false, err
+    }
+
+    return UneffectSuccessful(body), nil
+}
+
+var partialStfu bool = false
+var jawBruiser *regexp.Regexp = regexp.MustCompile(`(?i)<a href='showplayer\.php\?who=([0-9]+)' [^>]+>([^<]+)<\/a> has hit you in the jaw with a piece of candy`)
+func HandleKoLEvent(kol KoLRelay, message ChatMessage) (string, error) {
+    matches := jawBruiser.FindStringSubmatch(message.Msg)
+    if len(matches) > 0 {
+        fmt.Printf("Jawbruised by %s (%s), raw message: %s", matches[1], matches[2], message.Msg)
+        senderId := matches[1]
+        kol.SubmitChat("/msg " + senderId, "C'mon, don't be a dick.")
+
+        cleared, _ := ClearJawBruiser(kol)
+        toDiscord := fmt.Sprintf("%s (#%s) jawbruised the bot.", matches[2], matches[1])
+        if ! cleared {
+            partialStfu = true
+            toDiscord   = toDiscord + " And it could not be uneffected, so the bot will stop relaying messages to KoL."
+        }
+        return toDiscord, nil
+    }
+    return "", nil
 }
 
 type triggerTuple struct {
@@ -736,10 +828,11 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
 
     if m.Content == "RelayBot, spam on" {
         globalStfu = false
+        partialStfu = false
         return
     }
 
-    if globalStfu {
+    if globalStfu || partialStfu {
         return // respect the desire for silence
     }
 
@@ -825,6 +918,12 @@ func main() {
     err  = kol.LogIn(relay_bot_password)
     if err != nil {
         panic(err)
+    }
+
+    cleared, _ := ClearJawBruiser(kol)
+    if ! cleared {
+        fmt.Println("Started up jawbruised, and could not clear it!")
+        partialStfu = true
     }
 
     // Poll every 3 seconds:
@@ -926,12 +1025,22 @@ func main() {
                         continue
                     }
 
+                    toDiscord := ""
                     if IsKoLDM(message) {
-                        HandleKoLDM(kol, message)
-                        continue
+                        toDiscord, err = HandleKoLDM(kol, message)
+                    } else if IsKoLEvent(message) {
+                        toDiscord, err = HandleKoLEvent(kol, message)
+                    } else {
+                        toDiscord, err = HandleKoLPublicMessage(kol, message)
                     }
 
-                    RelayToDiscord(dg, relay_bot_target_channel, message)
+                    if err != nil {
+                        // TODO
+                        continue
+                    }
+                    if toDiscord != "" {
+                        RelayToDiscord(dg, relay_bot_target_channel, toDiscord)
+                    }
                 }
             }
         }
