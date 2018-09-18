@@ -26,15 +26,18 @@ import (
 )
 
 const baseUrl          = "https://www.kingdomofloathing.com/"
-const loginUrl         = baseUrl + "login.php"
-const newMessageUrl    = baseUrl + "newchatmessages.php"
-const submitMessageUrl = baseUrl + "submitnewchat.php"
-const lChatUrl         = baseUrl + "lchat.php"
+const (
+    loginUrl         = baseUrl + "login.php"
+    logoutUrl        = baseUrl + "logout.php"
+    newMessageUrl    = baseUrl + "newchatmessages.php"
+    submitMessageUrl = baseUrl + "submitnewchat.php"
+    lChatUrl         = baseUrl + "lchat.php"
+)
 
 // TODO: mprotect / mlock this sucker and put it inside the KoL interface
-var kol_password string
 type KoLRelay interface {
     LogIn(string)              error
+    LogOut()                   ([]byte, error)
     SubmitChat(string, string) ([]byte, error)
     PollChat()                 ([]byte, error)
     DecodeChat([]byte)         (*ChatResponse, error)
@@ -50,7 +53,7 @@ type relay struct {
     playerId      int64
 }
 
-func NewKoL(userName string, password string) KoLRelay {
+func NewKoL(userName string) KoLRelay {
     cookieJar, _ := cookiejar.New(nil)
     httpClient    := &http.Client{
         Jar:           cookieJar,
@@ -67,7 +70,6 @@ func NewKoL(userName string, password string) KoLRelay {
         },
     }
 
-    kol_password = password // TODO
     kol := &relay{
         UserName:   userName,
         HttpClient: httpClient,
@@ -75,11 +77,6 @@ func NewKoL(userName string, password string) KoLRelay {
         playerId:   3152049, // TODO
         PasswordHash: "",
     }
-    err := kol.LogIn(password)
-    if err != nil {
-        panic(err)
-    }
-
     return kol
 }
 
@@ -156,7 +153,7 @@ func (kol *relay) LogIn(password string) error {
     loginParams := url.Values{}
     loginParams.Set("loggingin",    "Yup.")
     loginParams.Set("loginname",    kol.UserName)
-    loginParams.Set("password",     kol_password)
+    loginParams.Set("password",     password)
     loginParams.Set("secure",       "0")
     loginParams.Set("submitbutton", "Log In")
 
@@ -190,6 +187,26 @@ func (kol *relay) LogIn(password string) error {
     }
 
     return nil
+}
+
+func (kol *relay) LogOut() ([]byte, error) {
+    httpClient := kol.HttpClient
+    req, err := http.NewRequest("GET", logoutUrl, nil)
+    if err != nil {
+        return nil, err
+    }
+    req.Header.Set("Accept",          "application/json, text/javascript, */*; q=0.01")
+    req.Header.Set("Accept-Encoding", "gzip")
+    req.Header.Set("Refered",         "https://www.kingdomofloathing.com/mchat.php")
+
+    resp, err := httpClient.Do(req)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
+
+    body, _ := ioutil.ReadAll(resp.Body)
+    return body, nil
 }
 
 // {"msgs":[],"last":"1468191607","delay":3000}
@@ -342,7 +359,7 @@ func (kol *relay) ResolveCharacterData() error {
 
 var globalStfu bool = false
 var metaRegexp *regexp.Regexp = regexp.MustCompile("([\\\\`])")
-func RelayToDiscord(dg *discordgo.Session, message ChatMessage) {
+func RelayToDiscord(dg *discordgo.Session, destChannel string, message ChatMessage) {
     if globalStfu {
         return
     }
@@ -371,11 +388,11 @@ func RelayToDiscord(dg *discordgo.Session, message ChatMessage) {
 
     cleanedMessage = metaRegexp.ReplaceAllString(cleanedMessage, `\$1`)
 
-    dg.ChannelMessageSend(relay_bot_target_channel, fmt.Sprintf("**%s**: `%s`", message.Who.Name, cleanedMessage))
+    dg.ChannelMessageSend(destChannel, fmt.Sprintf("**%s**: `%s`", message.Who.Name, cleanedMessage))
 }
 
-func NewDiscordConnection() *discordgo.Session {
-    dg, err := discordgo.New("Bot " + relay_bot_discord_key)
+func NewDiscordConnection(botAPIKey string) *discordgo.Session {
+    dg, err := discordgo.New("Bot " + botAPIKey)
 
     err = dg.Open()
     if err != nil {
@@ -663,12 +680,16 @@ func main() {
     defer fromKoL.Close()
 
     // Called when the bot sees a message on discord
-    dg := NewDiscordConnection()
+    dg := NewDiscordConnection(relay_bot_discord_key)
     dg.AddHandler(func (s *discordgo.Session, m *discordgo.MessageCreate) {
         HandleMessageFromDiscord(s, m, fromDiscord, discordToKoL)
     })
 
-    kol := NewKoL(relay_bot_username, relay_bot_password)
+    kol := NewKoL(relay_bot_username)
+    err  = kol.LogIn(relay_bot_password)
+    if err != nil {
+        panic(err)
+    }
 
     // Poll every 3 seconds:
     ticker := time.NewTicker(3*time.Second)
@@ -760,19 +781,20 @@ func main() {
                         continue
                     }
 
-                    RelayToDiscord(dg, message)
+                    RelayToDiscord(dg, relay_bot_target_channel, message)
                 }
             }
         }
     }()
 
+    // Cleanly close down the Discord session.
+    defer dg.Close()
+    // And disconnect from KoL
+    defer kol.LogOut()
+
     fmt.Println("Bot is now running.  Press CTRL-C to exit.")
     sc := make(chan os.Signal, 1)
     signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
     <-sc
-
-    // Cleanly close down the Discord session.
-    dg.Close()
-    // TODO: disconnect from KoL!
 }
 
