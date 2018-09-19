@@ -112,23 +112,105 @@ func (kol *relay)PlayerId() string {
     return kol.playerId
 }
 
-var relay_bot_username       string
-var relay_bot_password       string
-var relay_bot_discord_key    string
-var relay_bot_target_channel string
+type KoLConf struct {
+    Username string `json:"username"`
+    Password string `json:"password"`
+}
+var readKoLConf *KoLConf
+func GetKoLConf() *KoLConf {
+    if readKoLConf != nil {
+        return readKoLConf
+    }
 
-var passwordHashPatterns []*regexp.Regexp = []*regexp.Regexp {
-    regexp.MustCompile(`name=["']?pwd["']? value=["']([^"']+)["']`),
-    regexp.MustCompile(`pwd=([^&]+)`),
-    regexp.MustCompile(`pwd = "([^"]+)"`),
+    contents, err := ioutil.ReadFile("kol_conf.json")
+    if err != nil {
+        panic(err)
+    }
+
+    readKoLConf = new(KoLConf)
+    err = json.Unmarshal(contents, readKoLConf)
+    if err != nil {
+        panic(err)
+    }
+
+    return readKoLConf
+}
+
+type DiscordConf struct {
+    DiscordApiKey string `json:"discord_api_key"`
+}
+var readDiscordConf *DiscordConf
+func GetDiscordConf() *DiscordConf {
+    if readDiscordConf != nil {
+        return readDiscordConf
+    }
+
+    contents, err := ioutil.ReadFile("discord_config.json")
+    if err != nil {
+        panic(err)
+    }
+
+    readDiscordConf = new(DiscordConf)
+    err = json.Unmarshal(contents, readDiscordConf)
+    if err != nil {
+        panic(err)
+    }
+
+    return readDiscordConf
+}
+
+var readRelayConf map[string]map[string]string
+func GetRelayConf() map[string]map[string]string {
+    if len(readRelayConf) > 0 {
+        return readRelayConf
+    }
+
+    contents, err := ioutil.ReadFile("relay_targets.json")
+    if err != nil {
+        panic(err)
+    }
+    err = json.Unmarshal(contents, &readRelayConf)
+    if err != nil {
+        panic(err)
+    }
+
+    return readRelayConf
+}
+
+type dbConf struct {
+    DriverName string
+    DataSource string
+}
+var cachedDbConf *dbConf
+func DbConf() *dbConf {
+    if cachedDbConf != nil {
+        return cachedDbConf
+    }
+
+    // TODO:
+    // Hard-coded for now
+    cachedDbConf = &dbConf {
+        "sqlite3",
+        "./kol_relay.db",
+    }
+
+    return cachedDbConf
 }
 
 var gameNameOverride sync.Map
 func init() {
     rand.Seed(time.Now().UnixNano())
 
-    // Can we connect?
-    db, err := sql.Open("sqlite3", "./kol_relay.db")
+    LoadNameOverrides()
+
+    _ = GetKoLConf()
+    _ = GetDiscordConf()
+    _ = GetRelayConf()
+}
+
+func LoadNameOverrides() {
+    dbConf := DbConf()
+    db, err := sql.Open(dbConf.DriverName, dbConf.DataSource)
     if err != nil {
         panic(err)
     }
@@ -157,22 +239,6 @@ func init() {
     if err != nil {
         panic(err)
     }
-
-    contents, err := ioutil.ReadFile("config.json")
-    if err != nil {
-        panic(err)
-    }
-
-    var i interface{}
-    err = json.Unmarshal(contents, &i)
-    // TODO this can't be right...
-    m                       := i.(map[string]interface{})
-    kol                     := m["kol"].(map[string]interface{})
-    discord                 := m["discord"].(map[string]interface{})
-    relay_bot_username       = kol["user"].(string)
-    relay_bot_password       = kol["pass"].(string)
-    relay_bot_discord_key    = discord["api_key"].(string)
-    relay_bot_target_channel = discord["channel"].(string)
 }
 
 func (kol *relay) LogIn(password string) error {
@@ -517,6 +583,11 @@ func (kol *relay) queryLChat() ([]byte, error) {
     return body, CheckResponseForErrors(resp, body)
 }
 
+var passwordHashPatterns []*regexp.Regexp = []*regexp.Regexp {
+    regexp.MustCompile(`name=["']?pwd["']? value=["']([^"']+)["']`),
+    regexp.MustCompile(`pwd=([^&]+)`),
+    regexp.MustCompile(`pwd = "([^"]+)"`),
+}
 func (kol *relay) ResolveCharacterData() error {
     bodyBytes, err := kol.queryLChat()
     if err != nil {
@@ -551,10 +622,6 @@ func RelayToDiscord(dg *discordgo.Session, destChannel string, toDiscord string)
 }
 
 func HandleKoLPublicMessage(kol KoLRelay, message ChatMessage) (string, error) {
-    if !strings.Contains(message.Channel, "clan") {
-        return "", nil
-    }
-
     rawMessage     := message.Msg;
     cleanedMessage := html.UnescapeString(rawMessage)
     if strings.HasPrefix(cleanedMessage, "<") {
@@ -576,7 +643,12 @@ func HandleKoLPublicMessage(kol KoLRelay, message ChatMessage) (string, error) {
 
     cleanedMessage = metaRegexp.ReplaceAllString(cleanedMessage, `\$1`)
 
-    return fmt.Sprintf("**%s**: `%s`", message.Who.Name, cleanedMessage), nil
+    optionalChannel := ""
+    if message.Channel != "clan" {
+        optionalChannel = fmt.Sprintf("[%s] ", message.Channel)
+    }
+
+    return fmt.Sprintf("%s**%s**: `%s`", optionalChannel, message.Who.Name, cleanedMessage), nil
 }
 
 func NewDiscordConnection(botAPIKey string) *discordgo.Session {
@@ -675,7 +747,8 @@ var sqliteInsert sync.Mutex
 func InsertNewNickname(discordId string, nick string) {
     sqliteInsert.Lock()
     defer sqliteInsert.Unlock()
-    db, err := sql.Open("sqlite3", "./kol_relay.db")
+    dbConf := DbConf()
+    db, err := sql.Open(dbConf.DriverName, dbConf.DataSource)
     if err != nil {
         fmt.Println("Had an error opening kol_relay.db")
         return
@@ -870,7 +943,12 @@ func RandomBullshit(s *discordgo.Session, m *discordgo.MessageCreate ) {
     }
 }
 
-func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, fromDiscord *os.File, discordToKoL chan<- string) {
+type MessageToKoL struct {
+    Destination string
+    Message     string
+}
+
+func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, fromDiscord *os.File, discordToKoL chan<- *MessageToKoL) {
     if m.Author.ID == s.State.User.ID {
         // Ignore ourselves
         return
@@ -882,12 +960,13 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
         return
     }
 
-    if m.ChannelID != relay_bot_target_channel {
-        dm, _ := ComesFromDM(s, m)
-        if dm {
+    relayConf         := GetRelayConf()
+    targetChannel, ok := relayConf["from_discord_to_kol"][m.ChannelID]
+    if !ok {
+        if dm, _ := ComesFromDM(s, m); dm {
             HandleDM(s, m)
         }
-        return // someone spoke in general, ignore
+        return // Someone spoke in a channel we are not relaying
     }
 
     msgJson, _ := json.Marshal(m)
@@ -925,15 +1004,15 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
         // Hm..
         if len(finalMsg + author) < 300 {
             // Just split it
-            discordToKoL <- finalMsg[:150] + "..."
-            discordToKoL <- author + ": ..." + finalMsg[150:]
+            discordToKoL <- &MessageToKoL{ targetChannel, finalMsg[:150] + "..." }
+            discordToKoL <- &MessageToKoL{ targetChannel, author + ": ..." + finalMsg[150:] }
             return
         }
         // Too long!
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Brevity is the soul of wit, %s.  That message was too long, so it will not get relayed.", author))
         return
     }
-    discordToKoL <- finalMsg
+    discordToKoL <- &MessageToKoL{ targetChannel, finalMsg }
 }
 
 func (kol *relay)HandleKoLException(err error) error {
@@ -951,7 +1030,8 @@ func (kol *relay)HandleKoLException(err error) error {
         return err
     } else if kolError.ErrorType == Disconnect {
         fmt.Println("Looks like we were disconnected.  Try to reconnect!")
-        err = kol.LogIn(relay_bot_password)
+        kolConf := GetKoLConf()
+        err = kol.LogIn(kolConf.Password)
         if err != nil {
             return err
         }
@@ -971,7 +1051,7 @@ func (kol *relay)HandleKoLException(err error) error {
 }
 
 func main() {
-    discordToKoL := make(chan string)
+    discordToKoL := make(chan *MessageToKoL)
 
     fromDiscordLogfile := "/var/log/kol-relay/relay.log"
     fromKoLLogfile     := "/var/log/kol-relay/from_kol.log"
@@ -988,14 +1068,22 @@ func main() {
     }
     defer fromKoL.Close()
 
+    relayConf                 := GetRelayConf()
+    defaultDiscordChannel, ok := relayConf["from_kol_to_discord"]["clan"]
+    if !ok {
+        panic("The /clan channel MUST be part of the relays!")
+    }
+
     // Called when the bot sees a message on discord
-    dg := NewDiscordConnection(relay_bot_discord_key)
+    discordConf := GetDiscordConf()
+    dg := NewDiscordConnection(discordConf.DiscordApiKey)
     dg.AddHandler(func (s *discordgo.Session, m *discordgo.MessageCreate) {
         HandleMessageFromDiscord(s, m, fromDiscord, discordToKoL)
     })
 
-    kol := NewKoL(relay_bot_username, fromKoL)
-    err  = kol.LogIn(relay_bot_password)
+    kolConf := GetKoLConf()
+    kol := NewKoL(kolConf.Username, fromKoL)
+    err  = kol.LogIn(kolConf.Password)
     if err != nil {
         panic(err)
     }
@@ -1022,7 +1110,7 @@ func main() {
                     // First, disarm the away ticker and re-arm it:
                     awayTicker.Stop()
                     awayTicker = time.NewTicker(3*time.Minute)
-                    _, err := kol.SubmitChat("/clan", msg)
+                    _, err := kol.SubmitChat(msg.Destination, msg.Message)
                     if err != nil {
                         fatalError := kol.HandleKoLException(err)
                         if fatalError != nil {
@@ -1031,7 +1119,7 @@ func main() {
                         }
 
                         // Exception was handled, so retry:
-                        _, err = kol.SubmitChat("/clan", msg)
+                        _, err = kol.SubmitChat(msg.Destination, msg.Message)
                         if err != nil {
                             // Well, we tried, silver star.  Die:
                             panic(err)
@@ -1048,6 +1136,11 @@ func main() {
     }()
 
     kol.AddHandler(Public, func (kol KoLRelay, message ChatMessage) {
+        targetDiscordChannel, ok := relayConf["from_kol_to_discord"][message.Channel]
+        if !ok {
+            return
+        }
+
         toDiscord, err := HandleKoLPublicMessage(kol, message)
         if err != nil {
             // TODO
@@ -1056,7 +1149,7 @@ func main() {
         if toDiscord == "" {
             return
         }
-        RelayToDiscord(dg, relay_bot_target_channel, toDiscord)
+        RelayToDiscord(dg, targetDiscordChannel, toDiscord)
     })
 
     kol.AddHandler(Private, func (kol KoLRelay, message ChatMessage) {
@@ -1068,7 +1161,7 @@ func main() {
         if toDiscord == "" {
             return
         }
-        RelayToDiscord(dg, relay_bot_target_channel, toDiscord)
+        RelayToDiscord(dg, defaultDiscordChannel, toDiscord)
     })
 
     kol.AddHandler(Event, func (kol KoLRelay, message ChatMessage) {
@@ -1080,7 +1173,7 @@ func main() {
         if toDiscord == "" {
             return
         }
-        RelayToDiscord(dg, relay_bot_target_channel, toDiscord)
+        RelayToDiscord(dg, defaultDiscordChannel, toDiscord)
     })
 
     // Cleanly close down the Discord session.
