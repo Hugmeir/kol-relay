@@ -858,31 +858,53 @@ func HandleKoLDM(kol KoLRelay, message ChatMessage) (string, error) {
     return "", nil
 }
 
-func UneffectSuccessful(body []byte) bool {
-    bod := string(body)
-    if strings.Contains(bod, "Effect removed.") {
-        return true
-    }
-    if strings.Contains(bod, "Bruised Jaw (") {
-        fmt.Println("UNEFFECT FAILED: ", string(body))
-        return false
-    }
-    // Turns out we never had it!
-    return true
-}
+const (
+    bruisedJaw = 697
+    snowBall   = 718
+)
 
-const bruisedJaw = 697
 func ClearJawBruiser(kol KoLRelay) (bool, error) {
     body, err := kol.Uneffect(strconv.Itoa(bruisedJaw))
     if err != nil {
         return false, err
     }
 
-    return UneffectSuccessful(body), nil
+    bod := string(body)
+    if strings.Contains(bod, "Effect removed.") {
+        return true, nil
+    }
+    if strings.Contains(bod, "Bruised Jaw (") {
+        fmt.Println("UNEFFECT FAILED: ", string(body))
+        return false, nil
+    }
+    // Turns out we never had it!
+    return true, nil
+}
+
+func ClearSnowball(kol KoLRelay) (bool, error) {
+    body, err := kol.Uneffect(strconv.Itoa(snowBall))
+    if err != nil {
+        return false, err
+    }
+
+    bod := string(body)
+    if strings.Contains(bod, "Effect removed.") {
+        return true, nil
+    }
+    if strings.Contains(bod, "B-b-brr! (") {
+        fmt.Println("UNEFFECT FAILED: ", string(body))
+        return false, nil
+    }
+    // Turns out we never had it!
+    return true, nil
 }
 
 var partialStfu bool = false
 var jawBruiser *regexp.Regexp = regexp.MustCompile(`(?i)<a href='showplayer\.php\?who=([0-9]+)' [^>]+>([^<]+)<\/a> has hit you in the jaw with a piece of candy`)
+/*
+{"msgs":[{"type":"event","msg":"That rotten jerk <a href='showplayer.php?who=3061055' target=mainpane class=nounder style='color: green'>Hugmeir<\/a> plastered you in the face with a snowball! Grr! Also, Brr!<!--refresh-->","link":false,"time":"1537390984"}],"last":"1468370925","delay":3000}
+*/
+var snowBalled *regexp.Regexp = regexp.MustCompile(`(?i)<a href='showplayer\.php\?who=([0-9]+)' [^>]+>([^<]+)<\/a> plastered you in the face with a snowball`)
 func HandleKoLEvent(kol KoLRelay, message ChatMessage) (string, error) {
     matches := jawBruiser.FindStringSubmatch(message.Msg)
     if len(matches) > 0 {
@@ -898,6 +920,21 @@ func HandleKoLEvent(kol KoLRelay, message ChatMessage) (string, error) {
         }
         return toDiscord, nil
     }
+
+    matches = snowBalled.FindStringSubmatch(message.Msg)
+    if len(matches) > 0 {
+        fmt.Printf("Hit by a snowball from %s (%s), raw message: %s", matches[1], matches[2], message.Msg)
+        senderId := matches[1]
+        kol.SubmitChat("/msg " + senderId, "How about you don't?  That'll just be irritating for people reading chat.")
+
+        cleared, _ := ClearSnowball(kol)
+        toDiscord := fmt.Sprintf("%s (#%s) threw a snowball at the bot.", matches[2], matches[1])
+        if ! cleared {
+            toDiscord = toDiscord + " And it could not be uneffected, so the relayed messages will get effects."
+        }
+        return toDiscord, nil
+    }
+
     return "", nil
 }
 
@@ -1093,6 +1130,7 @@ func main() {
         fmt.Println("Started up jawbruised, and could not clear it!")
         partialStfu = true
     }
+    ClearSnowball(kol)
 
     awayTicker := time.NewTicker(3*time.Minute)
     defer awayTicker.Stop()
