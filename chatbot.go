@@ -35,7 +35,7 @@ const (
     uneffectUrl      = baseUrl + "uneffect.php"
 )
 
-// TODO: mprotect / mlock this sucker and put it inside the KoL interface
+type handlerInterface func(KoLRelay, ChatMessage)
 type KoLRelay interface {
     LogIn(string)              error
     LogOut()                   ([]byte, error)
@@ -44,7 +44,23 @@ type KoLRelay interface {
     Uneffect(string)           ([]byte, error)
     DecodeChat([]byte)         (*ChatResponse, error)
     HandleKoLException(error)  error
-    PlayerId() int64
+    PlayerId() string
+
+    AddHandler(int, handlerInterface)
+}
+
+const (
+    Public  = iota
+    Private
+    Event
+)
+func (kol *relay) AddHandler(eventType int, cb handlerInterface) {
+    handlers, ok := kol.handlers.Load(eventType)
+    if ok {
+        kol.handlers.Store(eventType, append(handlers.([]handlerInterface), cb))
+    } else {
+        kol.handlers.Store(eventType, []handlerInterface{cb})
+    }
 }
 
 type relay struct {
@@ -53,10 +69,13 @@ type relay struct {
     SessionId     string
     PasswordHash  string
     LastSeen      string
-    playerId      int64
+    playerId      string
+
+    Log           *os.File
+    handlers      sync.Map
 }
 
-func NewKoL(userName string) KoLRelay {
+func NewKoL(userName string, f *os.File) KoLRelay {
     cookieJar, _ := cookiejar.New(nil)
     httpClient    := &http.Client{
         Jar:           cookieJar,
@@ -77,13 +96,19 @@ func NewKoL(userName string) KoLRelay {
         UserName:   userName,
         HttpClient: httpClient,
         LastSeen:   "0",
-        playerId:   3152049, // TODO
+        playerId:   "3152049", // TODO
         PasswordHash: "",
+
+        Log: f,
     }
+
+    // Start the chat poller. Won't do anything until we have a password hash
+    go kol.StartChatPoll()
+
     return kol
 }
 
-func (kol *relay)PlayerId() int64 {
+func (kol *relay)PlayerId() string {
     return kol.playerId
 }
 
@@ -199,6 +224,64 @@ func (kol *relay) LogIn(password string) error {
     return nil
 }
 
+func (kol *relay)StartChatPoll() {
+
+    // Poll every 3 seconds:
+    ticker := time.NewTicker(3*time.Second)
+    defer ticker.Stop()
+
+    for { // just an infinite loop
+        // select waits until ticker ticks over, then runs this code
+        select {
+        case <-ticker.C:
+            if kol.PasswordHash == "" {
+                continue
+            }
+            rawChatReponse, err := kol.PollChat()
+            if err != nil {
+                fatalError      := kol.HandleKoLException(err)
+                if fatalError != nil {
+                    // Probably rollover?
+                    panic(fatalError)
+                }
+                fmt.Println("Polling KoL had some error we are now ignoring: ", err)
+                continue
+            }
+
+            // Dumb heuristics!  If it contains msgs:[], it's an empty response,
+            // so don't log it... unless it also contains "output":, in which case
+            // there might be an error in there somewhere.
+            chatReponseString := string(rawChatReponse)
+            if !strings.Contains(chatReponseString, `"msgs":[]`) || strings.Contains(chatReponseString, `"output":`) {
+                fmt.Fprintf(kol.Log, "%s: %s\n", time.Now().Format(time.RFC3339), string(rawChatReponse))
+            }
+
+            chatResponses, err := kol.DecodeChat(rawChatReponse)
+            if err != nil {
+                fmt.Println("Could not decode chat from KoL, ignoring it for now ", err)
+                continue
+            }
+
+            for i := 0; i < len(chatResponses.Msgs); i++ {
+                message  := chatResponses.Msgs[i]
+                senderId := SenderIdFromMessage(message)
+                if senderId == kol.PlayerId() {
+                    continue
+                }
+
+                t := MessageTypeFromMessage(message)
+                handlers, ok := kol.handlers.Load(t)
+                if !ok {
+                    continue
+                }
+                for _, cb := range handlers.([]handlerInterface) {
+                    go cb(kol, message)
+                }
+            }
+        }
+    }
+}
+
 func (kol *relay) LogOut() ([]byte, error) {
     httpClient := kol.HttpClient
     req, err := http.NewRequest("GET", logoutUrl, nil)
@@ -283,10 +366,8 @@ func (kol *relay)DecodeChat(jsonChat []byte) (*ChatResponse, error) {
     switch jsonResponse.Last.(type) {
         case string:
             kol.LastSeen = jsonResponse.Last.(string)
-            break
         case float64:
             kol.LastSeen = fmt.Sprintf("%v", jsonResponse.Last)
-            break
     }
 
     return &jsonResponse, nil
@@ -341,6 +422,10 @@ func (kol *relay) SubmitChat(destination string, message string) ([]byte, error)
         if err != nil {
             return nil, err
         }
+    }
+
+    if !strings.Contains(destination, "/who") {
+        fmt.Fprintf(kol.Log, "%s %d [RESPONSE]: %s\n", time.Now().Format(time.RFC3339), os.Getpid(), string(body))
     }
 
     return body, CheckResponseForErrors(resp, body)
@@ -646,18 +731,16 @@ func HandleVerification(s *discordgo.Session, m *discordgo.MessageCreate, verifi
     }
 }
 
-func IsKoLDM(message ChatMessage) bool {
+func MessageTypeFromMessage(message ChatMessage) int {
     if message.Type == "private" {
-        return true
+        return Private
+    } else if message.Type == "event" {
+        return Event
+    } else if message.Type == "public" {
+        return Public
+    } else {
+        return -1
     }
-    return false
-}
-
-func IsKoLEvent(message ChatMessage) bool {
-    if message.Type == "event" {
-        return true
-    }
-    return false
 }
 
 func SenderIdFromMessage(message ChatMessage) string {
@@ -666,13 +749,10 @@ func SenderIdFromMessage(message ChatMessage) string {
     switch sender.Id.(type) {
         case string:
             senderId, _ = sender.Id.(string)
-            break
         case int64:
             senderId = strconv.FormatInt(sender.Id.(int64), 10)
-            break
         case float64:
             senderId = strconv.FormatInt(int64(sender.Id.(float64)), 10)
-            break
     }
     return senderId
 }
@@ -893,7 +973,7 @@ func (kol *relay)HandleKoLException(err error) error {
 func main() {
     discordToKoL := make(chan string)
 
-    fromDiscordLogfile := "/var/log/kol-relay/from_discord.log"
+    fromDiscordLogfile := "/var/log/kol-relay/relay.log"
     fromKoLLogfile     := "/var/log/kol-relay/from_kol.log"
 
     fromDiscord, err := os.OpenFile(fromDiscordLogfile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
@@ -914,7 +994,7 @@ func main() {
         HandleMessageFromDiscord(s, m, fromDiscord, discordToKoL)
     })
 
-    kol := NewKoL(relay_bot_username)
+    kol := NewKoL(relay_bot_username, fromKoL)
     err  = kol.LogIn(relay_bot_password)
     if err != nil {
         panic(err)
@@ -926,28 +1006,23 @@ func main() {
         partialStfu = true
     }
 
-    // Poll every 3 seconds:
-    ticker := time.NewTicker(3*time.Second)
-    defer ticker.Stop()
-
-    awaitTicker := time.NewTicker(3*time.Minute)
-    defer awaitTicker.Stop()
+    awayTicker := time.NewTicker(3*time.Minute)
+    defer awayTicker.Stop()
 
     go func() {
-        responseRaw, err := kol.SubmitChat("/msg hugmeir", "oh hai creator")
+        _, err := kol.SubmitChat("/msg hugmeir", "oh hai creator")
         if err != nil {
             fmt.Println("Cannot send initial message, something has gone wrong: %v", err)
             panic(err)
         }
-        fmt.Fprintf(fromKoL, "%s %d [RESPONSE]: %s\n", time.Now().Format(time.RFC3339), os.Getpid(), string(responseRaw))
         for { // just an infinite loop
             // select waits until ticker ticks over, then runs this code
             select {
                 case msg := <-discordToKoL:
                     // First, disarm the away ticker and re-arm it:
-                    awaitTicker.Stop()
-                    awaitTicker = time.NewTicker(3*time.Minute)
-                    responseRaw, err := kol.SubmitChat("/clan", msg)
+                    awayTicker.Stop()
+                    awayTicker = time.NewTicker(3*time.Minute)
+                    _, err := kol.SubmitChat("/clan", msg)
                     if err != nil {
                         fatalError := kol.HandleKoLException(err)
                         if fatalError != nil {
@@ -956,95 +1031,57 @@ func main() {
                         }
 
                         // Exception was handled, so retry:
-                        responseRaw, err = kol.SubmitChat("/clan", msg)
+                        _, err = kol.SubmitChat("/clan", msg)
                         if err != nil {
                             // Well, we tried, silver star.  Die:
                             panic(err)
                         }
                     }
-                    fmt.Fprintf(fromKoL, "%s %d [RESPONSE]: %s\n", time.Now().Format(time.RFC3339), os.Getpid(), string(responseRaw))
-                    break
-                case <-awaitTicker.C:
+                case <-awayTicker.C:
                     _, err := kol.SubmitChat("/who", "clan")
                     fatalError := kol.HandleKoLException(err)
                     if fatalError != nil {
                         panic(fatalError)
                     }
-                    break
             }
         }
     }()
 
-    go func() {
-        for { // just an infinite loop
-            // select waits until ticker ticks over, then runs this code
-            select {
-            case <-ticker.C:
-                rawChatReponse, err := kol.PollChat()
-                if err != nil {
-                    fatalError      := kol.HandleKoLException(err)
-                    if fatalError != nil {
-                        // Probably rollover?
-                        panic(fatalError)
-                    }
-                    fmt.Println("Polling KoL had some error we are now ignoring: ", err)
-                    continue
-                }
-
-                // Dumb heuristics!  If it contains msgs:[], it's an empty response,
-                // so don't log it... unless it also contains "output":, in which case
-                // there might be an error in there somewhere.
-                chatReponseString := string(rawChatReponse)
-                if !strings.Contains(chatReponseString, `"msgs":[]`) || strings.Contains(chatReponseString, `"output":`) {
-                    fmt.Fprintf(fromKoL, "%s: %s\n", time.Now().Format(time.RFC3339), string(rawChatReponse))
-                }
-
-                chatResponses, err := kol.DecodeChat(rawChatReponse)
-                if err != nil {
-                    fmt.Println("Could not decode chat from KoL, ignoring it for now ", err)
-                    continue
-                }
-
-                for i := 0; i < len(chatResponses.Msgs); i++ {
-                    message := chatResponses.Msgs[i]
-                    sender := message.Who
-                    var senderId int64
-                    switch sender.Id.(type) {
-                        case string:
-                            senderId, _ = strconv.ParseInt(sender.Id.(string), 10, 64)
-                            break
-                        case int64:
-                            senderId = sender.Id.(int64)
-                            break
-                        case float64:
-                            senderId = int64(sender.Id.(float64))
-                            break
-                    }
-
-                    if senderId == kol.PlayerId() {
-                        continue
-                    }
-
-                    toDiscord := ""
-                    if IsKoLDM(message) {
-                        toDiscord, err = HandleKoLDM(kol, message)
-                    } else if IsKoLEvent(message) {
-                        toDiscord, err = HandleKoLEvent(kol, message)
-                    } else {
-                        toDiscord, err = HandleKoLPublicMessage(kol, message)
-                    }
-
-                    if err != nil {
-                        // TODO
-                        continue
-                    }
-                    if toDiscord != "" {
-                        RelayToDiscord(dg, relay_bot_target_channel, toDiscord)
-                    }
-                }
-            }
+    kol.AddHandler(Public, func (kol KoLRelay, message ChatMessage) {
+        toDiscord, err := HandleKoLPublicMessage(kol, message)
+        if err != nil {
+            // TODO
+            return
         }
-    }()
+        if toDiscord == "" {
+            return
+        }
+        RelayToDiscord(dg, relay_bot_target_channel, toDiscord)
+    })
+
+    kol.AddHandler(Private, func (kol KoLRelay, message ChatMessage) {
+        toDiscord, err := HandleKoLDM(kol, message)
+        if err != nil {
+            // TODO
+            return
+        }
+        if toDiscord == "" {
+            return
+        }
+        RelayToDiscord(dg, relay_bot_target_channel, toDiscord)
+    })
+
+    kol.AddHandler(Event, func (kol KoLRelay, message ChatMessage) {
+        toDiscord, err := HandleKoLEvent(kol, message)
+        if err != nil {
+            // TODO
+            return
+        }
+        if toDiscord == "" {
+            return
+        }
+        RelayToDiscord(dg, relay_bot_target_channel, toDiscord)
+    })
 
     // Cleanly close down the Discord session.
     defer dg.Close()
