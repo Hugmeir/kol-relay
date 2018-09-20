@@ -7,6 +7,7 @@ import (
     "regexp"
     "fmt"
     "time"
+    "flag"
     "syscall"
     "net/url"
     "golang.org/x/net/html"
@@ -112,6 +113,8 @@ func (kol *relay)PlayerId() string {
     return kol.playerId
 }
 
+var dbConfJson, discordConfJson, kolConfJson, relayConfJson string
+
 type KoLConf struct {
     Username string `json:"username"`
     Password string `json:"password"`
@@ -122,7 +125,7 @@ func GetKoLConf() *KoLConf {
         return readKoLConf
     }
 
-    contents, err := ioutil.ReadFile("kol_conf.json")
+    contents, err := ioutil.ReadFile(kolConfJson)
     if err != nil {
         panic(err)
     }
@@ -145,7 +148,7 @@ func GetDiscordConf() *DiscordConf {
         return readDiscordConf
     }
 
-    contents, err := ioutil.ReadFile("discord_config.json")
+    contents, err := ioutil.ReadFile(discordConfJson)
     if err != nil {
         panic(err)
     }
@@ -165,7 +168,7 @@ func GetRelayConf() map[string]map[string]string {
         return readRelayConf
     }
 
-    contents, err := ioutil.ReadFile("relay_targets.json")
+    contents, err := ioutil.ReadFile(relayConfJson)
     if err != nil {
         panic(err)
     }
@@ -178,8 +181,8 @@ func GetRelayConf() map[string]map[string]string {
 }
 
 type dbConf struct {
-    DriverName string
-    DataSource string
+    DriverName string `json:"driver_name"`
+    DataSource string `json:"data_source"`
 }
 var cachedDbConf *dbConf
 func DbConf() *dbConf {
@@ -187,19 +190,30 @@ func DbConf() *dbConf {
         return cachedDbConf
     }
 
-    // TODO:
-    // Hard-coded for now
-    cachedDbConf = &dbConf {
-        "sqlite3",
-        "./kol_relay.db",
+    contents, err := ioutil.ReadFile(dbConfJson)
+    if err != nil {
+        panic(err)
+    }
+
+    cachedDbConf = new(dbConf)
+    err = json.Unmarshal(contents, cachedDbConf)
+    if err != nil {
+        panic(err)
     }
 
     return cachedDbConf
 }
 
+
 var gameNameOverride sync.Map
 func init() {
     rand.Seed(time.Now().UnixNano())
+
+    flag.StringVar(&dbConfJson,      "db_conf",      "", "Path to the the database config JSON file")
+    flag.StringVar(&discordConfJson, "discord_conf", "", "Path to the the discord config JSON file")
+    flag.StringVar(&kolConfJson,     "kol_conf",     "", "Path to the the KoL config JSON file")
+    flag.StringVar(&relayConfJson,   "relay_conf",   "", "Path to the the relay targets JSON file")
+    flag.Parse()
 
     LoadNameOverrides()
 
