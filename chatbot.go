@@ -1151,7 +1151,7 @@ func main() {
             // select waits until ticker ticks over, then runs this code
             select {
                 case msg := <-discordToKoL:
-                    elapsed := time.Now().Sub(msg.Time)
+                    elapsed := time.Now().Sub(msg.Time).Seconds()
                     if elapsed > 30 {
                         // Stop relaying old messages.
                         continue
