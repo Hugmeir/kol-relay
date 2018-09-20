@@ -1088,7 +1088,7 @@ func (kol *relay)HandleKoLException(err error) error {
 }
 
 func main() {
-    discordToKoL := make(chan *MessageToKoL)
+    discordToKoL := make(chan *MessageToKoL, 200)
 
     fromDiscordLogfile := "/var/log/kol-relay/relay.log"
     fromKoLLogfile     := "/var/log/kol-relay/from_kol.log"
@@ -1141,13 +1141,21 @@ func main() {
             fmt.Println("Cannot send initial message, something has gone wrong: %v", err)
             panic(err)
         }
+
+        // Set up some super conservative rate limiting:
+        throttle := time.Tick( 1 * time.Second )
         for { // just an infinite loop
             // select waits until ticker ticks over, then runs this code
             select {
                 case msg := <-discordToKoL:
-                    // First, disarm the away ticker and re-arm it:
+                    // First, disarm the away ticker:
                     awayTicker.Stop()
+                    // Make sure we aren't massively spamming the game:
+                    <-throttle
+                    // re-arm the away ticker:
                     awayTicker = time.NewTicker(3*time.Minute)
+
+                    // Actually send the message to the game:
                     _, err := kol.SubmitChat(msg.Destination, msg.Message)
                     if err != nil {
                         fatalError := kol.HandleKoLException(err)
