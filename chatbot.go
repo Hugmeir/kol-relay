@@ -983,6 +983,7 @@ func RandomBullshit(s *discordgo.Session, m *discordgo.MessageCreate ) {
 type MessageToKoL struct {
     Destination string
     Message     string
+    Time        time.Time
 }
 
 func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, fromDiscord *os.File, discordToKoL chan<- *MessageToKoL) {
@@ -1037,19 +1038,21 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
     author    := sanitizeForKoL(ResolveNickname(s, m))
     msgForKoL := sanitizeForKoL(m.Content)
     finalMsg  := author + ": " + msgForKoL
+    now       := time.Now()
+
     if len(finalMsg) > 200 {
         // Hm..
         if len(finalMsg + author) < 300 {
             // Just split it
-            discordToKoL <- &MessageToKoL{ targetChannel, finalMsg[:150] + "..." }
-            discordToKoL <- &MessageToKoL{ targetChannel, author + ": ..." + finalMsg[150:] }
+            discordToKoL <- &MessageToKoL{ targetChannel, finalMsg[:150] + "...",            now }
+            discordToKoL <- &MessageToKoL{ targetChannel, author + ": ..." + finalMsg[150:], now }
             return
         }
         // Too long!
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Brevity is the soul of wit, %s.  That message was too long, so it will not get relayed.", author))
         return
     }
-    discordToKoL <- &MessageToKoL{ targetChannel, finalMsg }
+    discordToKoL <- &MessageToKoL{ targetChannel, finalMsg, now }
 }
 
 func (kol *relay)HandleKoLException(err error) error {
@@ -1148,6 +1151,11 @@ func main() {
             // select waits until ticker ticks over, then runs this code
             select {
                 case msg := <-discordToKoL:
+                    elapsed := time.Now().Sub(msg.Time)
+                    if elapsed > 30 {
+                        // Stop relaying old messages.
+                        continue
+                    }
                     // First, disarm the away ticker:
                     awayTicker.Stop()
                     // Make sure we aren't massively spamming the game:
