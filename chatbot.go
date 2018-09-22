@@ -265,6 +265,7 @@ func sanitizeForKoL (content string) string {
 
     // Try to normalize into NFC, so that combining characters
     // in the latin1 range look reasonable
+    content = AsciiFold(content)
     content = norm.NFC.String(content)
 
     // KoL chat only accepts the latin1 range:
