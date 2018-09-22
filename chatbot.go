@@ -22,6 +22,22 @@ import (
     "github.com/Hugmeir/kolgo"
 )
 
+func init() {
+    rand.Seed(time.Now().UnixNano())
+
+    flag.StringVar(&dbConfJson,      "db_conf",      "", "Path to the the database config JSON file")
+    flag.StringVar(&discordConfJson, "discord_conf", "", "Path to the the discord config JSON file")
+    flag.StringVar(&kolConfJson,     "kol_conf",     "", "Path to the the KoL config JSON file")
+    flag.StringVar(&relayConfJson,   "relay_conf",   "", "Path to the the relay targets JSON file")
+    flag.Parse()
+
+    LoadNameOverrides()
+
+    _ = GetKoLConf()
+    _ = GetDiscordConf()
+    _ = GetRelayConf()
+}
+
 var dbConfJson, discordConfJson, kolConfJson, relayConfJson string
 
 type KoLConf struct {
@@ -115,21 +131,7 @@ func DbConf() *dbConf {
 
 
 var gameNameOverride sync.Map
-func init() {
-    rand.Seed(time.Now().UnixNano())
 
-    flag.StringVar(&dbConfJson,      "db_conf",      "", "Path to the the database config JSON file")
-    flag.StringVar(&discordConfJson, "discord_conf", "", "Path to the the discord config JSON file")
-    flag.StringVar(&kolConfJson,     "kol_conf",     "", "Path to the the KoL config JSON file")
-    flag.StringVar(&relayConfJson,   "relay_conf",   "", "Path to the the relay targets JSON file")
-    flag.Parse()
-
-    LoadNameOverrides()
-
-    _ = GetKoLConf()
-    _ = GetDiscordConf()
-    _ = GetRelayConf()
-}
 
 func LoadNameOverrides() {
     dbConf := DbConf()
