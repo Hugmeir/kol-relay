@@ -168,6 +168,10 @@ func LoadNameOverrides() {
 
 var globalStfu bool = false
 var metaRegexp *regexp.Regexp = regexp.MustCompile("([\\\\`])")
+func EscapeDiscordMetaCharacters(s string) string {
+    return metaRegexp.ReplaceAllString(s, `\$1`)
+}
+
 func RelayToDiscord(dg *discordgo.Session, destChannel string, toDiscord string) {
     if globalStfu {
         return
@@ -195,7 +199,7 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (stri
         }
     }
 
-    cleanedMessage = metaRegexp.ReplaceAllString(cleanedMessage, `\$1`)
+    cleanedMessage = EscapeDiscordMetaCharacters(cleanedMessage)
 
     optionalChannel := ""
     if message.Channel != "clan" {
@@ -361,6 +365,15 @@ func HandleVerification(s *discordgo.Session, m *discordgo.MessageCreate, verifi
         // Hmm...
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Incorrect verification code: '%s'", verificationCode))
     }
+}
+
+/*
+{"msgs":[{"msg":"A new trivial update has been posted: You can now walk away from the intro choice in the Neverending Party if you want, like if you accidentally show up wearing the wrong shirt or something.","type":"system","mid":"1468408333","who":{"name":"System Message","id":"-1","color":""},"format":"2","channelcolor":"green","time":"1537455943"}],"last":"1468408333","delay":3000}
+*/
+func HandleKoLSystemMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (string, error) {
+    msg := EscapeDiscordMetaCharacters(message.Msg)
+    toDiscord := fmt.Sprintf("```css\n%s: %s\n```", message.Who.Name, msg)
+    return toDiscord, nil
 }
 
 var firstVerifyRe *regexp.Regexp = regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?!?`)
@@ -705,6 +718,18 @@ func main() {
             return
         }
         RelayToDiscord(dg, targetDiscordChannel, toDiscord)
+    })
+
+    kol.AddHandler(kolgo.System, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
+        toDiscord, err := HandleKoLSystemMessage(kol, message)
+        if err != nil {
+            // TODO
+            return
+        }
+        if toDiscord == "" {
+            return
+        }
+        RelayToDiscord(dg, defaultDiscordChannel, toDiscord)
     })
 
     kol.AddHandler(kolgo.Private, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
