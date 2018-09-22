@@ -10,6 +10,7 @@ import (
     "flag"
     "syscall"
     "golang.org/x/net/html"
+    "golang.org/x/text/unicode/norm"
     "golang.org/x/text/encoding/charmap"
     "io/ioutil"
     "strings"
@@ -259,6 +260,10 @@ func ResolveNickname(s *discordgo.Session, m *discordgo.MessageCreate) string {
 // This should be [\p{Latin1}\p{ASCII}], but no such thing in golang
 var nonLatin1Re *regexp.Regexp = regexp.MustCompile(`[^\x00-\xff]`)
 func sanitizeForKoL (content string) string {
+
+    // Try to normalize into NFC, so that combining characters
+    // in the latin1 range look reasonable
+    content = norm.NFC.String(content)
 
     // KoL chat only accepts the latin1 range:
     content = nonLatin1Re.ReplaceAllString(content, ``)
