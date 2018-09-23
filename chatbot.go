@@ -166,12 +166,26 @@ func LoadNameOverrides() {
     }
 }
 
-var globalStfu bool = false
-var metaRegexp *regexp.Regexp = regexp.MustCompile("([\\\\`])")
+// Sigh, discord, why...
+// We wrap all messages in ``s to prevent abuse.
+// So the only metacharacter we need to quote is '`'.  Even '\' is not a metacharacter.. unless
+// it precedes a '`'.
+// Due to purist crap reasons, no positive lookbehind (?<=\\) in the default regex
+// engine, and no recursive regexes either, so just try the long way:
+var metaRegexp *regexp.Regexp = regexp.MustCompile(
+    // If the grave is already quoted (preceded by a backslash), no need to grab it
+    `(?:`                       +
+        `^`                     + // begining of string followed by a `
+        `|[^\\]`                + // or a grave not preceded by a backslash
+        `|(?:^|[^\\])(?:\\\\)+` + // Or a grave preceded by escaped backslashes
+    `)`                         +
+    `([\x60])`,                   // Capture the grave, in case we need to extend this eventually...
+)
 func EscapeDiscordMetaCharacters(s string) string {
     return metaRegexp.ReplaceAllString(s, `\$1`)
 }
 
+var globalStfu bool = false
 func RelayToDiscord(dg *discordgo.Session, destChannel string, toDiscord string) {
     if globalStfu {
         return
@@ -500,7 +514,7 @@ var bullshitTriggers = []triggerTuple {
         },
     },
     triggerTuple {
-        regexp.MustCompile(`(?i)^\s*RelayBot,?\s+tell\s+me\s+about\s+(.+)`),
+        regexp.MustCompile(`(?i)^\s*Relay(?:Bot)?,?\s+tell\s+me\s+about\s+(.+)`),
         func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
             about := matches[1]
             if strings.Contains(about, "IO ERROR") {
