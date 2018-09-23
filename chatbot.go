@@ -727,7 +727,11 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
     msgJson, _ := json.Marshal(m)
     fmt.Fprintf(fromDiscord, "%s: %s\n", time.Now().Format(time.RFC3339), msgJson)
 
-    msg := m.Content
+    msg, err := m.ContentWithMoreMentionsReplaced(s)
+    if err != nil {
+        msg = m.ContentWithMentionsReplaced()
+    }
+
     if m.Attachments != nil && len(m.Attachments) > 0 {
         for _, attachment := range m.Attachments {
             if len(msg) > 0 {
