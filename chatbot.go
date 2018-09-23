@@ -406,6 +406,11 @@ var allDMHandlers = []dmHandlers {
         // For use in emergencies!
         regexp.MustCompile(`(?i)\A!cmd Kill\z`),
         func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+            if !SenderCanRunCommands(s, m) {
+                s.ChannelMessageSend(m.ChannelID, "That would've totes done something if you had the rights to do the thing.")
+                return
+            }
+
             _, err := os.OpenFile(killFile, os.O_RDONLY|os.O_CREATE, 0666)
             if err != nil {
                 s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Going down, but could not prevent respawning, so the bot will return in 5 minutes.  Reason given: %s", err))
@@ -422,7 +427,12 @@ var allDMHandlers = []dmHandlers {
         // Basically a 'did you turn it off and on again' command.
         regexp.MustCompile(`(?i)\A!cmd Crash\z`),
         func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
-            panic(errors.New(fmt.Sprintf("Asked to crash by %s", m.Author.Username)))
+            if SenderCanRunCommands(s, m) {
+                s.ChannelMessageSend(m.ChannelID, "Crashing, bot should return in ~5m")
+                panic(errors.New(fmt.Sprintf("Asked to crash by %s", m.Author.Username)))
+            } else {
+                s.ChannelMessageSend(m.ChannelID, "That would've totes done something if you had the rights to do the thing.")
+            }
         },
     },
     dmHandlers {
