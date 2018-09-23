@@ -392,7 +392,7 @@ var allDMHandlers = []dmHandlers {
         // Will execute the /... in-game as the relay:
         //  !cmd /msg Hugmeir oh hey boss
         // That will send me a message.  Don't spam me >.>
-        regexp.MustCompile(`(?i)!c(?:md|ommand) (/[^\s]+)(\s*.*)`),
+        regexp.MustCompile(`(?i)!(?:cmd|powerword) (/[^\s]+)(\s*.*)`),
         HandleCommandForGame,
     },
     dmHandlers {
@@ -404,7 +404,7 @@ var allDMHandlers = []dmHandlers {
         // with access to the box it is running on.
         //
         // For use in emergencies!
-        regexp.MustCompile(`(?i)\A!cmd Kill\z`),
+        regexp.MustCompile(`(?i)\A!(?:cmd|powerword) Kill\z`),
         func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
             if !SenderCanRunCommands(s, m) {
                 s.ChannelMessageSend(m.ChannelID, "That would've totes done something if you had the rights to do the thing.")
@@ -425,7 +425,7 @@ var allDMHandlers = []dmHandlers {
         //
         // Will crash the relay.  It will come back in ~5 minutes or so.
         // Basically a 'did you turn it off and on again' command.
-        regexp.MustCompile(`(?i)\A!cmd Crash\z`),
+        regexp.MustCompile(`(?i)\A!(?:cmd|powerword) Crash\z`),
         func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
             if SenderCanRunCommands(s, m) {
                 s.ChannelMessageSend(m.ChannelID, "Crashing, bot should return in ~5m")
@@ -440,7 +440,7 @@ var allDMHandlers = []dmHandlers {
         // !cmd stop
         //
         // Will make it stop relaying messages.
-        regexp.MustCompile(`(?i)\A!cmd (?:Relay(?:Bot),?\s+)?(?:stfu|stop)`),
+        regexp.MustCompile(`(?i)\A!(?:cmd|powerword) (?:Relay(?:Bot),?\s+)?(?:stfu|stop)`),
         func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
             if SenderCanRunCommands(s, m) {
                 globalStfu = true
@@ -455,7 +455,7 @@ var allDMHandlers = []dmHandlers {
         // !cmd start
         //
         // Will make it start relaying messages if previously stfu'd
-        regexp.MustCompile(`(?i)\A!cmd (?:Relay(?:Bot),?\s+)?(?:spam on|start)`),
+        regexp.MustCompile(`(?i)\A!(?:cmd|powerword) (?:Relay(?:Bot),?\s+)?(?:spam on|start)`),
         func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
             if SenderCanRunCommands(s, m) {
                 globalStfu  = false
