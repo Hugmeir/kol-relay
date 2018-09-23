@@ -10,8 +10,13 @@ import (
     "flag"
     "syscall"
     "golang.org/x/net/html"
+
+    "unicode"
+    "unicode/utf8"
     "golang.org/x/text/unicode/norm"
+    "golang.org/x/text/unicode/runenames"
     "golang.org/x/text/encoding/charmap"
+
     "io/ioutil"
     "strings"
     "math/rand"
@@ -277,17 +282,40 @@ func ResolveNickname(s *discordgo.Session, m *discordgo.MessageCreate) string {
 }
 */
 
+func EmojiNoMore(s string) string {
+    for i, w := 0, 0; i < len(s); i += w {
+        c, width := utf8.DecodeRuneInString(s[i:])
+        w = width
+        if c > 0xFF && unicode.IsSymbol(c) {
+            name := runenames.Name(c)
+            s = s[:i] + "[" + name + "]" + s[i+w:]
+            w = len(name) + 2
+        }
+    }
+    return s
+}
+
 // This should be [\p{Latin1}\p{ASCII}], but no such thing in golang
 var nonLatin1Re *regexp.Regexp = regexp.MustCompile(`[^\x00-\xff]`)
+func ClearNonLatin1Characters(s string) string {
+    // KoL chat only accepts the latin1 range:
+    return nonLatin1Re.ReplaceAllString(s, ``)
+}
+
 func sanitizeForKoL (content string) string {
+
+    // Remove smallcaps and similar deviants
+    content = AsciiFold(content)
+
+    // Try to convert emoji into their character names.  Makes for
+    // weirder messages but...
+    content = EmojiNoMore(content)
 
     // Try to normalize into NFC, so that combining characters
     // in the latin1 range look reasonable
-    content = AsciiFold(content)
     content = norm.NFC.String(content)
 
-    // KoL chat only accepts the latin1 range:
-    content = nonLatin1Re.ReplaceAllString(content, ``)
+    content = ClearNonLatin1Characters(content)
 
     // KoL chat only accepts latin1, so encode before sending:
     encoded, err := charmap.ISO8859_1.NewEncoder().String(content)
@@ -314,7 +342,6 @@ type dmHandlers struct {
     re *regexp.Regexp
     cb func(*discordgo.Session, *discordgo.MessageCreate, []string, chan<- *MessageToKoL)
 }
-        //regexp.MustCompile(`\p{Extended_Pictographic}`),
 
 var allDMHandlers = []dmHandlers {
     dmHandlers {
