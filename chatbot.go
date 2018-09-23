@@ -727,7 +727,17 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
     msgJson, _ := json.Marshal(m)
     fmt.Fprintf(fromDiscord, "%s: %s\n", time.Now().Format(time.RFC3339), msgJson)
 
-    if m.Content == "" {
+    msg := m.Content
+    if m.Attachments != nil && len(m.Attachments) > 0 {
+        for _, attachment := range m.Attachments {
+            if len(msg) > 0 {
+                msg += " "
+            }
+            msg += attachment.ProxyURL
+        }
+    }
+
+    if msg == "" {
         // Empty message
         // We get here when someone sends a file/picture etc
         // with no message body.  Just skip it.
@@ -741,7 +751,7 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
     go RandomBullshit(s, m)
 
     author    := sanitizeForKoL(ResolveNickname(s, m))
-    msgForKoL := sanitizeForKoL(m.Content)
+    msgForKoL := sanitizeForKoL(msg)
     finalMsg  := author + ": " + msgForKoL
     now       := time.Now()
 
