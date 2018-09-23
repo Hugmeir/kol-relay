@@ -557,10 +557,17 @@ func RandomBullshit(s *discordgo.Session, m *discordgo.MessageCreate ) {
     }
 }
 
+type MsgType int
+const (
+    Command MsgType = iota
+    Message
+)
+
 type MessageToKoL struct {
     Destination string
     Message     string
     Time        time.Time
+    Type        MsgType
 }
 
 func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, fromDiscord *os.File, discordToKoL chan<- *MessageToKoL) {
@@ -621,15 +628,15 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
         // Hm..
         if len(finalMsg + author) < 300 {
             // Just split it
-            discordToKoL <- &MessageToKoL{ targetChannel, finalMsg[:150] + "...",            now }
-            discordToKoL <- &MessageToKoL{ targetChannel, author + ": ..." + finalMsg[150:], now }
+            discordToKoL <- &MessageToKoL{ targetChannel, finalMsg[:150] + "...",            now, Message }
+            discordToKoL <- &MessageToKoL{ targetChannel, author + ": ..." + finalMsg[150:], now, Message }
             return
         }
         // Too long!
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Brevity is the soul of wit, %s.  That message was too long, so it will not get relayed.", author))
         return
     }
-    discordToKoL <- &MessageToKoL{ targetChannel, finalMsg, now }
+    discordToKoL <- &MessageToKoL{ targetChannel, finalMsg, now, Message }
 }
 
 func main() {
@@ -703,8 +710,10 @@ func main() {
                     }
                     // First, disarm the away ticker:
                     awayTicker.Stop()
-                    // Make sure we aren't massively spamming the game:
-                    <-throttle
+                    if msg.Type != Command {
+                        // Make sure we aren't massively spamming the game:
+                        <-throttle
+                    }
                     // re-arm the away ticker:
                     awayTicker = time.NewTicker(3*time.Minute)
 
