@@ -357,7 +357,7 @@ func HandleCommandForGame(s *discordgo.Session, m *discordgo.MessageCreate, matc
         return
     }
 
-    kol.SendMessage(&kolgo.MessageToKoL{ matches[0], matches[1], now, kolgo.Command })
+    kol.SendMessage(&kolgo.MessageToKoL{ matches[1], matches[2], now, kolgo.Command })
 }
 
 var allDMHandlers = []dmHandlers {
@@ -369,7 +369,27 @@ var allDMHandlers = []dmHandlers {
         regexp.MustCompile(`(?i)!c(?:md|ommand) (/[^\s]+)(\s*.*)`),
         HandleCommandForGame,
     },
+    dmHandlers {
+        regexp.MustCompile(`(?i)\A(?:Relay(?:Bot),?\s+)?(?:stfu|stop)`),
+        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+            if SenderCanRunCommands(s, m) {
+                globalStfu = true
+            }
+            s.ChannelMessageSend(m.ChannelID, "Floodgates are CLOSED.  No messages will be relayed")
+        },
+    },
+    dmHandlers {
+        regexp.MustCompile(`(?i)\A(?:Relay(?:Bot),?\s+)?(?:spam on|start)`),
+        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+            if SenderCanRunCommands(s, m) {
+                globalStfu  = false
+                partialStfu = false
+            }
+            s.ChannelMessageSend(m.ChannelID, "Floodgates are open")
+        },
+    },
 }
+
 func HandleDM(s *discordgo.Session, m *discordgo.MessageCreate, kol kolgo.KoLRelay) {
     for _, handler := range allDMHandlers {
         re      := handler.re
@@ -633,18 +653,6 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
         // Empty message
         // We get here when someone sends a file/picture etc
         // with no message body.  Just skip it.
-        return
-    }
-
-    if m.Content == "RelayBot, stfu" {
-        // We have been asked to quit it, so do!
-        globalStfu = true
-        return
-    }
-
-    if m.Content == "RelayBot, spam on" {
-        globalStfu = false
-        partialStfu = false
         return
     }
 
