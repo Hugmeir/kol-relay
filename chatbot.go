@@ -372,12 +372,11 @@ func SenderCanRunCommands(s *discordgo.Session, m *discordgo.MessageCreate) bool
 }
 
 func HandleCommandForGame(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
-    now := time.Now()
     if !SenderCanRunCommands(s, m) {
         return
     }
 
-    kol.SendMessage(&kolgo.MessageToKoL{ matches[1], matches[2], now, kolgo.Command })
+    kol.SendCommand(matches[1], matches[2])
 }
 
 const killFile = "/tmp/kol-relay-KILL"
@@ -563,7 +562,7 @@ func HandleKoLDM(kol kolgo.KoLRelay, message kolgo.ChatMessage) (string, error) 
 
     _, ok := verificationsPending.Load("User:" + message.Who.Name);
     if ok {
-        kol.SubmitChat("/msg " + senderId, "Already sent you a code, you must wait 5 minutes to generate a new one")
+        kol.SendMessage("/msg " + senderId, "Already sent you a code, you must wait 5 minutes to generate a new one")
         return "", nil
     }
 
@@ -571,7 +570,8 @@ func HandleKoLDM(kol kolgo.KoLRelay, message kolgo.ChatMessage) (string, error) 
     verificationsPending.Store("Code:" + verificationCode, message.Who.Name)
     verificationsPending.Store("User:" + message.Who.Name, verificationCode)
 
-    kol.SubmitChat("/msg " + senderId, "In Discord, send me a private message saying \"Verify me: " + verificationCode + "\", without the quotes.  This will expire in 5 minutes")
+    kol.SendMessage("/msg " + senderId, "In Discord, send me a private message saying \"Verify me: " + verificationCode + "\", without the quotes.  This will expire in 5 minutes")
+
     go func() {
         time.Sleep(5 * time.Minute)
         verificationsPending.Delete("Code:" + verificationCode)
@@ -633,7 +633,7 @@ func HandleKoLEvent(kol kolgo.KoLRelay, message kolgo.ChatMessage) (string, erro
     if len(matches) > 0 {
         fmt.Printf("Jawbruised by %s (%s), raw message: %s", matches[1], matches[2], message.Msg)
         senderId := matches[1]
-        kol.SubmitChat("/msg " + senderId, "C'mon, don't be a dick.")
+        kol.SendMessage("/msg " + senderId, "C'mon, don't be a dick.")
 
         cleared, _ := ClearJawBruiser(kol)
         toDiscord := fmt.Sprintf("%s (#%s) jawbruised the bot.", matches[2], matches[1])
@@ -648,7 +648,7 @@ func HandleKoLEvent(kol kolgo.KoLRelay, message kolgo.ChatMessage) (string, erro
     if len(matches) > 0 {
         fmt.Printf("Hit by a snowball from %s (%s), raw message: %s", matches[1], matches[2], message.Msg)
         senderId := matches[1]
-        kol.SubmitChat("/msg " + senderId, "How about you don't?  That'll just be irritating for people reading chat.")
+        kol.SendMessage("/msg " + senderId, "How about you don't?  That'll just be irritating for people reading chat.")
 
         cleared, _ := ClearSnowball(kol)
         toDiscord := fmt.Sprintf("%s (#%s) threw a snowball at the bot.", matches[2], matches[1])
@@ -753,21 +753,20 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
     author    := sanitizeForKoL(ResolveNickname(s, m))
     msgForKoL := sanitizeForKoL(msg)
     finalMsg  := author + ": " + msgForKoL
-    now       := time.Now()
 
     if len(finalMsg) > 200 {
         // Hm..
         if len(finalMsg + author) < 300 {
             // Just split it
-            kol.SendMessage(&kolgo.MessageToKoL{ targetChannel, finalMsg[:150] + "...",            now, kolgo.Message })
-            kol.SendMessage(&kolgo.MessageToKoL{ targetChannel, author + ": ..." + finalMsg[150:], now, kolgo.Message })
+            kol.SendMessage(targetChannel, finalMsg[:150] + "...")
+            kol.SendMessage(targetChannel, author + ": ..." + finalMsg[150:])
             return
         }
         // Too long!
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Brevity is the soul of wit, %s.  That message was too long, so it will not get relayed.", author))
         return
     }
-    kol.SendMessage(&kolgo.MessageToKoL{ targetChannel, finalMsg, now, kolgo.Message })
+    kol.SendMessage(targetChannel, finalMsg)
 }
 
 var administrators sync.Map
@@ -867,6 +866,8 @@ func main() {
     ClearSnowball(kol)
 
     // Try sending the initial message to confirm that everything is working
+    // NOTE: We use SubmitChat, not the "nicer" interface SendMessage here,
+    // because want to die if this fails to send.
     _, err = kol.SubmitChat("/msg hugmeir", "oh hai creator")
     if err != nil {
         fmt.Println("Cannot send initial message, something has gone wrong: %v", err)
