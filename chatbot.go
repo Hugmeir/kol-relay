@@ -310,14 +310,30 @@ func ComesFromDM(s *discordgo.Session, m *discordgo.MessageCreate) (bool, error)
     return channel.Type == discordgo.ChannelTypeDM, nil
 }
 
-var verifyRe *regexp.Regexp = regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?: ([0-9]{10,})`)
-func HandleDM(s *discordgo.Session, m *discordgo.MessageCreate) {
-    verifyMatches := verifyRe.FindStringSubmatch(m.Content)
-    if len(verifyMatches) > 0 {
-        HandleVerification(s, m, verifyMatches[1])
-    } else {
-        s.ChannelMessageSend(m.ChannelID, "<some funny message about not understanding what you mean>");
+type dmHandlers struct {
+    re *regexp.Regexp
+    cb func(*discordgo.Session, *discordgo.MessageCreate, []string, chan<- *MessageToKoL)
+}
+        //regexp.MustCompile(`\p{Extended_Pictographic}`),
+
+var allDMHandlers = []dmHandlers {
+    dmHandlers {
+        regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?: ([0-9]{10,})`),
+        HandleVerification,
+    },
+}
+func HandleDM(s *discordgo.Session, m *discordgo.MessageCreate, discordToKoL chan<- *MessageToKoL) {
+    for _, handler := range allDMHandlers {
+        re      := handler.re
+        matches := re.FindStringSubmatch(m.Content)
+        if len(matches) > 0 {
+            handler.cb(s, m, matches, discordToKoL)
+            // One match per DM
+            return
+        }
     }
+
+    s.ChannelMessageSend(m.ChannelID, "<some funny message about not understanding what you mean>");
 }
 
 var sqliteInsert sync.Mutex
@@ -366,7 +382,8 @@ func InsertNewNickname(discordId string, nick string) {
 }
 
 var verificationsPending sync.Map
-func HandleVerification(s *discordgo.Session, m *discordgo.MessageCreate, verificationCode string) {
+func HandleVerification(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, discordToKoL chan<- *MessageToKoL) {
+    verificationCode := matches[1]
     result, ok := verificationsPending.Load("Code:" + verificationCode)
     if ok {
         // Insert in the db:
@@ -562,7 +579,7 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
     targetChannel, ok := relayConf["from_discord_to_kol"][m.ChannelID]
     if !ok {
         if dm, _ := ComesFromDM(s, m); dm {
-            HandleDM(s, m)
+            HandleDM(s, m, discordToKoL)
         }
         return // Someone spoke in a channel we are not relaying
     }
