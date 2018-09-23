@@ -1,5 +1,6 @@
 package main
 import (
+    "errors"
     "os"
     "os/signal"
     "sync"
@@ -29,6 +30,11 @@ import (
 
 func init() {
     rand.Seed(time.Now().UnixNano())
+
+    if _, err := os.Stat(killFile); !os.IsNotExist(err) {
+        panic(errors.New("Killfile exists, refusing to start"))
+    }
+
 
     flag.StringVar(&dbConfJson,      "db_conf",      "", "Path to the the database config JSON file")
     flag.StringVar(&discordConfJson, "discord_conf", "", "Path to the the discord config JSON file")
@@ -71,6 +77,7 @@ func GetKoLConf() *KoLConf {
 
 type DiscordConf struct {
     DiscordApiKey string `json:"discord_api_key"`
+    AdminRole     string `json:"admin_role"`
 }
 var readDiscordConf *DiscordConf
 func GetDiscordConf() *DiscordConf {
@@ -343,7 +350,20 @@ type dmHandlers struct {
     cb func(*discordgo.Session, *discordgo.MessageCreate, []string, kolgo.KoLRelay)
 }
 
+func IsAdmin(s *discordgo.Session, m *discordgo.MessageCreate) bool {
+    _, ok := administrators.Load(m.Author.ID)
+    if ok {
+        return true
+    }
+
+    return false
+}
+
 func SenderCanRunCommands(s *discordgo.Session, m *discordgo.MessageCreate) bool {
+    if IsAdmin(s, m) {
+        return true
+    }
+
     if m.Author.Username == "hugmeir" {
         return true
     }
@@ -360,32 +380,80 @@ func HandleCommandForGame(s *discordgo.Session, m *discordgo.MessageCreate, matc
     kol.SendMessage(&kolgo.MessageToKoL{ matches[1], matches[2], now, kolgo.Command })
 }
 
+const killFile = "/tmp/kol-relay-KILL"
+
 var allDMHandlers = []dmHandlers {
     dmHandlers {
         regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?: ([0-9]{10,})`),
         HandleVerification,
     },
     dmHandlers {
+        // !cmd /...
+        // Will execute the /... in-game as the relay:
+        //  !cmd /msg Hugmeir oh hey boss
+        // That will send me a message.  Don't spam me >.>
         regexp.MustCompile(`(?i)!c(?:md|ommand) (/[^\s]+)(\s*.*)`),
         HandleCommandForGame,
     },
     dmHandlers {
-        regexp.MustCompile(`(?i)\A(?:Relay(?:Bot),?\s+)?(?:stfu|stop)`),
+        // !cmd Kill
+        //
+        // This is the killswitch for the relay.
+        //
+        // It stops the relay and prevents it from coming back up until manually checked by someone
+        // with access to the box it is running on.
+        //
+        // For use in emergencies!
+        regexp.MustCompile(`(?i)\A!cmd Kill\z`),
         func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
-            if SenderCanRunCommands(s, m) {
-                globalStfu = true
+            _, err := os.OpenFile(killFile, os.O_RDONLY|os.O_CREATE, 0666)
+            if err != nil {
+                s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Going down, but could not prevent respawning, so the bot will return in 5 minutes.  Reason given: %s", err))
+            } else {
+                s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Going down, will NOT come back until the killfile is manually removed"))
             }
-            s.ChannelMessageSend(m.ChannelID, "Floodgates are CLOSED.  No messages will be relayed")
+            panic(errors.New(fmt.Sprintf("*Killed* by %s", m.Author.Username)))
         },
     },
     dmHandlers {
-        regexp.MustCompile(`(?i)\A(?:Relay(?:Bot),?\s+)?(?:spam on|start)`),
+        // !cmd Crash
+        //
+        // Will crash the relay.  It will come back in ~5 minutes or so.
+        // Basically a 'did you turn it off and on again' command.
+        regexp.MustCompile(`(?i)\A!cmd Crash\z`),
+        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+            panic(errors.New(fmt.Sprintf("Asked to crash by %s", m.Author.Username)))
+        },
+    },
+    dmHandlers {
+        // !cmd stfu
+        // !cmd stop
+        //
+        // Will make it stop relaying messages.
+        regexp.MustCompile(`(?i)\A!cmd (?:Relay(?:Bot),?\s+)?(?:stfu|stop)`),
+        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+            if SenderCanRunCommands(s, m) {
+                globalStfu = true
+                s.ChannelMessageSend(m.ChannelID, "Floodgates are CLOSED.  No messages will be relayed")
+            } else {
+                s.ChannelMessageSend(m.ChannelID, "That would've totes done something if you had the rights to do the thing.")
+            }
+        },
+    },
+    dmHandlers {
+        // !cmd spam on
+        // !cmd start
+        //
+        // Will make it start relaying messages if previously stfu'd
+        regexp.MustCompile(`(?i)\A!cmd (?:Relay(?:Bot),?\s+)?(?:spam on|start)`),
         func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
             if SenderCanRunCommands(s, m) {
                 globalStfu  = false
                 partialStfu = false
+                s.ChannelMessageSend(m.ChannelID, "Floodgates are open")
+            } else {
+                s.ChannelMessageSend(m.ChannelID, "That would've totes done something if you had the rights to do the thing.")
             }
-            s.ChannelMessageSend(m.ChannelID, "Floodgates are open")
         },
     },
 }
@@ -682,6 +750,41 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
     kol.SendMessage(&kolgo.MessageToKoL{ targetChannel, finalMsg, now, kolgo.Message })
 }
 
+var administrators sync.Map
+func FleshenAdministrators(s *discordgo.Session, defaultDiscordChannel string, discordAdminRole string) {
+    c, err := s.Channel(defaultDiscordChannel)
+    if err != nil {
+        return
+    }
+
+    g, err := s.Guild(c.GuildID)
+    guildRoles := g.Roles
+    if err != nil {
+        return
+    }
+
+    nagusRole := ""
+    for _, r := range guildRoles {
+        if r.Name == discordAdminRole {
+            nagusRole = r.ID
+            break
+        }
+    }
+
+    if nagusRole == "" {
+        return
+    }
+
+    for _, member := range g.Members {
+        for _, roleName := range member.Roles {
+            if roleName == nagusRole {
+                administrators.Store(member.User.ID, true)
+                break
+            }
+        }
+    }
+}
+
 func main() {
     fromDiscordLogfile := "/var/log/kol-relay/relay.log"
     fromKoLLogfile     := "/var/log/kol-relay/from_kol.log"
@@ -711,6 +814,8 @@ func main() {
     dg := NewDiscordConnection(discordConf.DiscordApiKey)
     // Cleanly close down the Discord session.
     defer dg.Close()
+
+    go FleshenAdministrators(dg, defaultDiscordChannel, discordConf.AdminRole)
 
     // Conenct to KoL
     kol := kolgo.NewKoL(kolConf.Username, fromKoL)
