@@ -340,7 +340,24 @@ func ComesFromDM(s *discordgo.Session, m *discordgo.MessageCreate) (bool, error)
 
 type dmHandlers struct {
     re *regexp.Regexp
-    cb func(*discordgo.Session, *discordgo.MessageCreate, []string, chan<- *MessageToKoL)
+    cb func(*discordgo.Session, *discordgo.MessageCreate, []string, kolgo.KoLRelay)
+}
+
+func SenderCanRunCommands(s *discordgo.Session, m *discordgo.MessageCreate) bool {
+    if m.Author.Username == "hugmeir" {
+        return true
+    }
+
+    return false
+}
+
+func HandleCommandForGame(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+    now := time.Now()
+    if !SenderCanRunCommands(s, m) {
+        return
+    }
+
+    kol.SendMessage(&kolgo.MessageToKoL{ matches[0], matches[1], now, kolgo.Command })
 }
 
 var allDMHandlers = []dmHandlers {
@@ -348,13 +365,17 @@ var allDMHandlers = []dmHandlers {
         regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?: ([0-9]{10,})`),
         HandleVerification,
     },
+    dmHandlers {
+        regexp.MustCompile(`(?i)!c(?:md|ommand) (/[^\s]+)(\s*.*)`),
+        HandleCommandForGame,
+    },
 }
-func HandleDM(s *discordgo.Session, m *discordgo.MessageCreate, discordToKoL chan<- *MessageToKoL) {
+func HandleDM(s *discordgo.Session, m *discordgo.MessageCreate, kol kolgo.KoLRelay) {
     for _, handler := range allDMHandlers {
         re      := handler.re
         matches := re.FindStringSubmatch(m.Content)
         if len(matches) > 0 {
-            handler.cb(s, m, matches, discordToKoL)
+            handler.cb(s, m, matches, kol)
             // One match per DM
             return
         }
@@ -409,7 +430,7 @@ func InsertNewNickname(discordId string, nick string) {
 }
 
 var verificationsPending sync.Map
-func HandleVerification(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, discordToKoL chan<- *MessageToKoL) {
+func HandleVerification(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
     verificationCode := matches[1]
     result, ok := verificationsPending.Load("Code:" + verificationCode)
     if ok {
@@ -584,20 +605,7 @@ func RandomBullshit(s *discordgo.Session, m *discordgo.MessageCreate ) {
     }
 }
 
-type MsgType int
-const (
-    Command MsgType = iota
-    Message
-)
-
-type MessageToKoL struct {
-    Destination string
-    Message     string
-    Time        time.Time
-    Type        MsgType
-}
-
-func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, fromDiscord *os.File, discordToKoL chan<- *MessageToKoL) {
+func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, fromDiscord *os.File, kol kolgo.KoLRelay) {
     if m.Author.ID == s.State.User.ID {
         // Ignore ourselves
         return
@@ -613,7 +621,7 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
     targetChannel, ok := relayConf["from_discord_to_kol"][m.ChannelID]
     if !ok {
         if dm, _ := ComesFromDM(s, m); dm {
-            HandleDM(s, m, discordToKoL)
+            HandleDM(s, m, kol)
         }
         return // Someone spoke in a channel we are not relaying
     }
@@ -655,20 +663,18 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
         // Hm..
         if len(finalMsg + author) < 300 {
             // Just split it
-            discordToKoL <- &MessageToKoL{ targetChannel, finalMsg[:150] + "...",            now, Message }
-            discordToKoL <- &MessageToKoL{ targetChannel, author + ": ..." + finalMsg[150:], now, Message }
+            kol.SendMessage(&kolgo.MessageToKoL{ targetChannel, finalMsg[:150] + "...",            now, kolgo.Message })
+            kol.SendMessage(&kolgo.MessageToKoL{ targetChannel, author + ": ..." + finalMsg[150:], now, kolgo.Message })
             return
         }
         // Too long!
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Brevity is the soul of wit, %s.  That message was too long, so it will not get relayed.", author))
         return
     }
-    discordToKoL <- &MessageToKoL{ targetChannel, finalMsg, now, Message }
+    kol.SendMessage(&kolgo.MessageToKoL{ targetChannel, finalMsg, now, kolgo.Message })
 }
 
 func main() {
-    discordToKoL := make(chan *MessageToKoL, 200)
-
     fromDiscordLogfile := "/var/log/kol-relay/relay.log"
     fromKoLLogfile     := "/var/log/kol-relay/from_kol.log"
 
@@ -690,86 +696,53 @@ func main() {
         panic("The /clan channel MUST be part of the relays!")
     }
 
-    // Called when the bot sees a message on discord
     discordConf := GetDiscordConf()
-    dg := NewDiscordConnection(discordConf.DiscordApiKey)
-    dg.AddHandler(func (s *discordgo.Session, m *discordgo.MessageCreate) {
-        HandleMessageFromDiscord(s, m, fromDiscord, discordToKoL)
-    })
+    kolConf     := GetKoLConf()
 
-    kolConf := GetKoLConf()
+    // Connect to discord
+    dg := NewDiscordConnection(discordConf.DiscordApiKey)
+    // Cleanly close down the Discord session.
+    defer dg.Close()
+
+    // Conenct to KoL
     kol := kolgo.NewKoL(kolConf.Username, fromKoL)
     err  = kol.LogIn(kolConf.Password)
     if err != nil {
         panic(err)
     }
+    // Cleanly disconnect from KoL
+    defer kol.LogOut()
+
+    // This handler is called when the bot sees a message on discord
+    dg.AddHandler(func (s *discordgo.Session, m *discordgo.MessageCreate) {
+        HandleMessageFromDiscord(s, m, fromDiscord, kol)
+    })
 
     // Start the chat poller.
     go kol.StartChatPoll(kolConf.Password)
+    go kol.StartMessagePoll(kolConf.Password)
 
+    // Clear the Bruised Jaw effect.  If we fail, do not relay messages
+    // from discord into kol
     cleared, _ := ClearJawBruiser(kol)
     if ! cleared {
         fmt.Println("Started up jawbruised, and could not clear it!")
         partialStfu = true
     }
+    // Clear the snowball effect.  No harm if we can't -- just a lousy
+    // chat effect.
     ClearSnowball(kol)
 
-    awayTicker := time.NewTicker(3*time.Minute)
-    defer awayTicker.Stop()
+    // Try sending the initial message to confirm that everything is working
+    _, err = kol.SubmitChat("/msg hugmeir", "oh hai creator")
+    if err != nil {
+        fmt.Println("Cannot send initial message, something has gone wrong: %v", err)
+        panic(err)
+    }
 
-    go func() {
-        _, err := kol.SubmitChat("/msg hugmeir", "oh hai creator")
-        if err != nil {
-            fmt.Println("Cannot send initial message, something has gone wrong: %v", err)
-            panic(err)
-        }
-
-        // Set up some super conservative rate limiting:
-        throttle := time.Tick( 1 * time.Second )
-        for { // just an infinite loop
-            // select waits until ticker ticks over, then runs this code
-            select {
-                case msg := <-discordToKoL:
-                    elapsed := time.Now().Sub(msg.Time).Seconds()
-                    if elapsed > 30 {
-                        // Stop relaying old messages.
-                        continue
-                    }
-                    // First, disarm the away ticker:
-                    awayTicker.Stop()
-                    if msg.Type != Command {
-                        // Make sure we aren't massively spamming the game:
-                        <-throttle
-                    }
-                    // re-arm the away ticker:
-                    awayTicker = time.NewTicker(3*time.Minute)
-
-                    // Actually send the message to the game:
-                    _, err := kol.SubmitChat(msg.Destination, msg.Message)
-                    if err != nil {
-                        fatalError := kol.HandleKoLException(err, kolConf.Password)
-                        if fatalError != nil {
-                            fmt.Println("Got an error submitting to kol?!")
-                            panic(fatalError)
-                        }
-
-                        // Exception was handled, so retry:
-                        _, err = kol.SubmitChat(msg.Destination, msg.Message)
-                        if err != nil {
-                            // Well, we tried, silver star.  Die:
-                            panic(err)
-                        }
-                    }
-                case <-awayTicker.C:
-                    _, err := kol.SubmitChat("/who", "clan")
-                    fatalError := kol.HandleKoLException(err, kolConf.Password)
-                    if fatalError != nil {
-                        panic(fatalError)
-                    }
-            }
-        }
-    }()
-
+    // This handler is called when we see a "public" message in KoL chat -- a public
+    // message is basically anything that is not a private message (/msg), and event
+    // (like getting hit with a jawbruiser) or a system message (trivial announcements)
     kol.AddHandler(kolgo.Public, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
         targetDiscordChannel, ok := relayConf["from_kol_to_discord"][message.Channel]
         if !ok {
@@ -787,6 +760,8 @@ func main() {
         RelayToDiscord(dg, targetDiscordChannel, toDiscord)
     })
 
+    // Called when we see a system message in KoL.  Currently untested because, well,
+    // those are rare >.>
     kol.AddHandler(kolgo.System, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
         toDiscord, err := HandleKoLSystemMessage(kol, message)
         if err != nil {
@@ -799,6 +774,7 @@ func main() {
         RelayToDiscord(dg, defaultDiscordChannel, toDiscord)
     })
 
+    // Called when we get a private message in KoL
     kol.AddHandler(kolgo.Private, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
         toDiscord, err := HandleKoLDM(kol, message)
         if err != nil {
@@ -811,6 +787,7 @@ func main() {
         RelayToDiscord(dg, defaultDiscordChannel, toDiscord)
     })
 
+    // Called when we see an 'event', like getting jawbruised or snowballed
     kol.AddHandler(kolgo.Event, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
         toDiscord, err := HandleKoLEvent(kol, message)
         if err != nil {
@@ -822,11 +799,6 @@ func main() {
         }
         RelayToDiscord(dg, defaultDiscordChannel, toDiscord)
     })
-
-    // Cleanly close down the Discord session.
-    defer dg.Close()
-    // And disconnect from KoL
-    defer kol.LogOut()
 
     fmt.Println("Bot is now running.  Press CTRL-C to exit.")
     sc := make(chan os.Signal, 1)
