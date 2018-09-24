@@ -301,7 +301,7 @@ type dmHandlers struct {
 }
 
 func IsAdmin(s *discordgo.Session, m *discordgo.MessageCreate) bool {
-    _, ok := administrators.Load(m.Author.ID)
+    _, ok := administrators[m.Author.ID]
     if ok {
         return true
     }
@@ -653,6 +653,23 @@ func RandomBullshit(s *discordgo.Session, m *discordgo.MessageCreate ) {
     }
 }
 
+/*
+{"id":"493885813935964160","channel_id":"490888267550425123","content":"\u003c@\u0026472130126482505740\u003e \u003c@289897239579459584\u003e \u003c#49088
+8267550425123\u003e \u003c:catplanet:493885480971141152\u003e","timestamp":"2018-09-24T20:45:53.997000+00:00","edited_timestamp":"","mention_roles":["472130126482505740"],"tts":fals
+e,"mention_everyone":false,"author":{"id":"289897239579459584","email":"","username":"hugmeir","avatar":"","discriminator":"0463","token":"","verified":false,"mfa_enabled":false,"bo
+t":false},"attachments":[],"embeds":[],"mentions":[{"id":"289897239579459584","email":"","username":"hugmeir","avatar":"","discriminator":"0463","token":"","verified":false,"mfa_ena
+bled":false,"bot":false}],"reactions":null,"type":0}
+*/
+var extraUnhandledMentions *regexp.Regexp = regexp.MustCompile(`(?i)<(:[^:]+:)[0-9]+>`)
+
+func ClearMoreUnhandledDiscordery(msg string) string {
+    msg = extraUnhandledMentions.ReplaceAllString(msg, `$1`)
+    for rank, name := range rankIDToName {
+        msg = strings.Replace(msg, rank, name, -1)
+    }
+    return msg
+}
+
 func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, fromDiscord *os.File, kol kolgo.KoLRelay) {
     if m.Author.ID == s.State.User.ID {
         // Ignore ourselves
@@ -681,6 +698,8 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
     if err != nil {
         msg = m.ContentWithMentionsReplaced()
     }
+
+    msg = ClearMoreUnhandledDiscordery(msg)
 
     if m.Attachments != nil && len(m.Attachments) > 0 {
         for _, attachment := range m.Attachments {
@@ -723,7 +742,8 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
     kol.SendMessage(targetChannel, finalMsg)
 }
 
-var administrators sync.Map
+var administrators map[string]bool   = make(map[string]bool, 20)
+var rankIDToName   map[string]string = make(map[string]string, 20)
 func FleshenAdministrators(s *discordgo.Session, defaultDiscordChannel string, discordAdminRole string) {
     c, err := s.Channel(defaultDiscordChannel)
     if err != nil {
@@ -738,9 +758,10 @@ func FleshenAdministrators(s *discordgo.Session, defaultDiscordChannel string, d
 
     nagusRole := ""
     for _, r := range guildRoles {
+        rankIDToName["<@&" + r.ID + ">"] = r.Name
+
         if r.Name == discordAdminRole {
             nagusRole = r.ID
-            break
         }
     }
 
@@ -751,7 +772,7 @@ func FleshenAdministrators(s *discordgo.Session, defaultDiscordChannel string, d
     for _, member := range g.Members {
         for _, roleName := range member.Roles {
             if roleName == nagusRole {
-                administrators.Store(member.User.ID, true)
+                administrators[member.User.ID] = true
                 break
             }
         }
