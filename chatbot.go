@@ -205,34 +205,53 @@ func RelayToDiscord(dg *discordgo.Session, destChannel string, toDiscord string)
     dg.ChannelMessageSend(destChannel, toDiscord)
 }
 
+var slashMeMatcher *regexp.Regexp = regexp.MustCompile(`(?i)\A<b><i><a target=mainpane href=[^>]+><font color[^>]+>([^<]+)<\\?/b><\\?/font><\\?/a>(.+)<\\?/i>\z`)
 func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (string, error) {
     rawMessage     := message.Msg;
-    cleanedMessage := html.UnescapeString(rawMessage)
-    if strings.HasPrefix(cleanedMessage, "<") {
+    preparedSender  := fmt.Sprintf("**%s**: ", message.Who.Name)
+    preparedMessage := html.UnescapeString(rawMessage)
+
+    indentAll := false
+
+    if strings.HasPrefix(preparedMessage, "<") {
         // golden text, chat effects, etc.
-        tokens := html.NewTokenizer(strings.NewReader(cleanedMessage))
-        cleanedMessage = ""
-        loop:
-        for {
-            tt := tokens.Next()
-            switch tt {
-            case html.ErrorToken:
-                break loop
-            case html.TextToken:
-                cleanedMessage = cleanedMessage + string(tokens.Text())
+        meMatch := slashMeMatcher.FindStringSubmatch(preparedMessage)
+        if len(meMatch) > 0 {
+            // /me foo
+            indentAll      = true
+            preparedSender  = fmt.Sprintf("**`%s`**", meMatch[1])
+            preparedMessage = " " + meMatch[2]
+        } else {
+            preparedMessage = EscapeDiscordMetaCharacters(preparedMessage)
+            tokens := html.NewTokenizer(strings.NewReader(preparedMessage))
+            preparedMessage = ""
+            loop:
+            for {
+                tt := tokens.Next()
+                switch tt {
+                case html.ErrorToken:
+                    break loop
+                case html.TextToken:
+                    preparedMessage = preparedMessage + string(tokens.Text())
+                }
+                // TODO: could grab colors & apply them in markdown
             }
-            // TODO: could grab colors & apply them in markdown
         }
     }
 
-    cleanedMessage = EscapeDiscordMetaCharacters(cleanedMessage)
+    preparedMessage = EscapeDiscordMetaCharacters(preparedMessage)
 
-    optionalChannel := ""
-    if message.Channel != "clan" {
-        optionalChannel = fmt.Sprintf("[%s] ", message.Channel)
+    finalMsg := fmt.Sprintf("%s`%s`", preparedSender, preparedMessage)
+
+    if indentAll {
+        finalMsg = "_" + finalMsg + "_"
     }
 
-    return fmt.Sprintf("%s**%s**: `%s`", optionalChannel, message.Who.Name, cleanedMessage), nil
+    if message.Channel != "clan" {
+        finalMsg = fmt.Sprintf("[%s] %s", message.Channel, finalMsg)
+    }
+
+    return finalMsg, nil
 }
 
 func NewDiscordConnection(botAPIKey string) *discordgo.Session {
