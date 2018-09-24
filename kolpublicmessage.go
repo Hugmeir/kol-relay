@@ -22,7 +22,12 @@ func EscapeDiscordMetaCharacters(s string) string {
     // `a``b``  => `a````b`,   which displays as [a````b] (yep...)
     // `a```b`  => `a``````b`, which displays as [`a``````b`] (...yepp...)
     // basically, once double-backticked, it stops being a metacharacter.
-    return strings.Replace(s, "`", "``", -1)
+    s = strings.Replace(s, "`", "``", -1)
+    if s[len(s)-1] == '`' {
+        // Sigh... A backtick at the end of the string messes things up, so:
+        s = s + " "
+    }
+    return s
 }
 
 var linkMatcher    *regexp.Regexp = regexp.MustCompile(`(?i)<a target=_blank href="([^"]+)"[^>]*><font[^>]+>[^<]+<[^>]+><\\?/a>`)
