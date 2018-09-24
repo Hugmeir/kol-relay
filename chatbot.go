@@ -20,6 +20,7 @@ import (
 
     "io/ioutil"
     "strings"
+    "bytes"
     "math/rand"
     "encoding/json"
     "database/sql"
@@ -205,6 +206,69 @@ func RelayToDiscord(dg *discordgo.Session, destChannel string, toDiscord string)
     dg.ChannelMessageSend(destChannel, toDiscord)
 }
 
+var linkMatcher    *regexp.Regexp = regexp.MustCompile(`(?i)<a target=_blank href="([^"]+)"[^>]*><font[^>]+>[^<]+<[^>]+><\\?/a>`)
+var brokenLinkRe   *regexp.Regexp = regexp.MustCompile(`(?i)[a-z0-9-]+[a-z09]\.(?:com|net|org)/((?:(?:\s[a-z0-9-]+|(?:[a-z0-9-]+ -)*)+/?)+)`)
+func FixMangledChatLinks(a string) string {
+    c := strings.Replace(a, `https:// `, `https://`, -1)
+    c  = strings.Replace(c,  `http:// `, `http://`,  -1)
+    s := []byte(a)
+    max := 10
+    for {
+        max--
+        if max < 1 {
+            break
+        }
+
+        loc := linkMatcher.FindSubmatchIndex(s);
+        if len(loc) <= 0 {
+            // No matches!
+            break
+        }
+
+        // Grab the "good" url out of the <a> before we shift things around:
+        urlRaw     := s[loc[2]:loc[3]]
+        url        := []byte(regexp.QuoteMeta(string(urlRaw)))
+        url         = bytes.Replace(url, []byte(`/`), []byte(`\s*/\s*`), -1)
+        url         = bytes.Replace(url, []byte(`-`), []byte(`\s*-\s*`), -1)
+        urlRe, err := regexp.Compile(string(url))
+        if err == nil {
+            // If it failed to compile, meh, just ignore it; otherwise,
+            // use the regex we just created to replace the broken urls
+            s = urlRe.ReplaceAll(s, urlRaw)
+        } else {
+            fmt.Println("Regexp failed to compile with ", err)
+        }
+
+        // Now get rid of the whole <a> eyesore:
+        // The following is the go way of doing this
+        // s = s[:loc[0]] + s[loc[1]:]
+        // One day...
+        s = s[:loc[0] + copy(s[loc[0]:], s[loc[1]+1:])]
+    }
+
+    max = 10
+    for {
+        max--
+        if max < 1 {
+            break
+        }
+
+        loc := brokenLinkRe.FindSubmatchIndex(s)
+        if len(loc) <= 0 {
+            // No matches!
+            break
+        }
+
+        fixedUrl := bytes.Replace(s[loc[2]:loc[3]], []byte(` `), []byte(``), -1)
+        //fmt.Println(fixedUrl)
+        //s = s[:loc[2] + copy(s[loc[2]:], s[loc[3]+1:])]
+        // ugh I can't get this to work
+        s = []byte(string(s[:loc[2]]) + string(fixedUrl) + string(s[loc[3]:]))
+    }
+
+    return string(s)
+}
+
 var slashMeMatcher *regexp.Regexp = regexp.MustCompile(`(?i)\A<b><i><a target=mainpane href=[^>]+><font color[^>]+>([^<]+)<\\?/b><\\?/font><\\?/a>(.+)<\\?/i>\z`)
 func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (string, error) {
     rawMessage     := message.Msg;
@@ -212,6 +276,8 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (stri
     preparedMessage := html.UnescapeString(rawMessage)
 
     indentAll := false
+
+    preparedMessage = FixMangledChatLinks(preparedMessage)
 
     if strings.HasPrefix(preparedMessage, "<") {
         // golden text, chat effects, etc.
@@ -222,6 +288,7 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (stri
             preparedSender  = fmt.Sprintf("**`%s`**", meMatch[1])
             preparedMessage = " " + meMatch[2]
         } else {
+            // TODO: Why are we doing this twice??
             preparedMessage = EscapeDiscordMetaCharacters(preparedMessage)
             tokens := html.NewTokenizer(strings.NewReader(preparedMessage))
             preparedMessage = ""
