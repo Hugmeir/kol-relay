@@ -34,13 +34,8 @@ func FixMangledChatLinks(a string) string {
     c := strings.Replace(a, `https:// `, `https://`, -1)
     c  = strings.Replace(c,  `http:// `, `http://`,  -1)
     s := []byte(a)
-    max := 10
-    for {
-        max--
-        if max < 1 {
-            break
-        }
 
+    for max := 10; max > 1; max-- {
         loc := linkMatcher.FindSubmatchIndex(s);
         if len(loc) <= 0 {
             // No matches!
@@ -68,13 +63,7 @@ func FixMangledChatLinks(a string) string {
         s = s[:loc[0] + copy(s[loc[0]:], s[loc[1]+1:])]
     }
 
-    max = 10
-    for {
-        max--
-        if max < 1 {
-            break
-        }
-
+    for max := 10; max > 1; max-- {
         loc := brokenLinkRe.FindSubmatchIndex(s)
         if len(loc) <= 0 {
             // No matches!
