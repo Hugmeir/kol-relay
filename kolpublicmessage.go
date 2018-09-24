@@ -80,25 +80,38 @@ func FixMangledChatLinks(a string) string {
     return string(s)
 }
 
+var effectMatcher  *regexp.Regexp = regexp.MustCompile(`(?i)<img src="[^"]+12x12(heart|skull)\.[^"]+"[^>]*>`)
 var slashMeMatcher *regexp.Regexp = regexp.MustCompile(`(?i)\A<b><i><a target=mainpane href=[^>]+><font color[^>]+>([^<]+)<\\?/b><\\?/font><\\?/a>(.+)<\\?/i>\z`)
+var effectToCmd    map[string]string = map[string]string{
+    "heart": `<:chatheart:493814910111842306>`,
+    "skull": `<:chatskull:493815533490143243>`,
+}
 func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (string, error) {
     rawMessage     := message.Msg;
     preparedSender  := fmt.Sprintf("**%s**: ", message.Who.Name)
     preparedMessage := html.UnescapeString(rawMessage)
 
-    indentAll := false
+    wrapAround := make(map[string]bool, 3)
 
     preparedMessage = FixMangledChatLinks(preparedMessage)
 
     if strings.HasPrefix(preparedMessage, "<") {
         // golden text, chat effects, etc.
-        meMatch := slashMeMatcher.FindStringSubmatch(preparedMessage)
-        if len(meMatch) > 0 {
+        if meMatch := slashMeMatcher.FindStringSubmatch(preparedMessage); len(meMatch) > 0 {
             // /me foo
-            indentAll      = true
+            wrapAround["_"] = true
             preparedSender  = fmt.Sprintf("**`%s`**", meMatch[1])
             preparedMessage = " " + meMatch[2]
         } else {
+            preparedMessage = effectMatcher.ReplaceAllStringFunc(preparedMessage, func(t string) string {
+                if strings.Contains(t, `heart`) {
+                    wrapAround[effectToCmd[`heart`]] = true
+                } else {
+                    wrapAround[effectToCmd[`skull`]] = true
+                }
+                return ``
+            })
+
             // TODO: Why are we doing this twice??
             preparedMessage = EscapeDiscordMetaCharacters(preparedMessage)
             tokens := html.NewTokenizer(strings.NewReader(preparedMessage))
@@ -121,8 +134,8 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (stri
 
     finalMsg := fmt.Sprintf("%s`%s`", preparedSender, preparedMessage)
 
-    if indentAll {
-        finalMsg = "_" + finalMsg + "_"
+    for wrap, _ := range wrapAround {
+        finalMsg = wrap + finalMsg + wrap
     }
 
     if message.Channel != "clan" {
