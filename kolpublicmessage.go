@@ -12,20 +12,17 @@ import (
 // Sigh, discord, why...
 // We wrap all messages in ``s to prevent abuse.
 // So the only metacharacter we need to quote is '`'.  Even '\' is not a metacharacter.. unless
-// it precedes a '`'.
-// Due to purist crap reasons, no positive lookbehind (?<=\\) in the default regex
-// engine, and no recursive regexes either, so just try the long way:
-var metaRegexp *regexp.Regexp = regexp.MustCompile(
-    // If the grave is already quoted (preceded by a backslash), no need to grab it
-    `(?:`                       +
-        `^`                     + // begining of string followed by a `
-        `|[^\\]`                + // or a grave not preceded by a backslash
-        `|(?:^|[^\\])(?:\\\\)+` + // Or a grave preceded by escaped backslashes
-    `)`                         +
-    `([\x60])`,                   // Capture the grave, in case we need to extend this eventually...
-)
+// it comes at the start of a string, which is not a problem for us because we
+// precede all messages with the username.
+// Due to purist crap reasons, no positive lookbehind (?<=\\) or lookahead in the default regex
+// engine, and no recursive regexes either.
+// So just double down on the quotiness:
 func EscapeDiscordMetaCharacters(s string) string {
-    return metaRegexp.ReplaceAllString(s, `\$1`)
+    // `a`b`    => `a``b`,     which displays as [a``b]
+    // `a``b``  => `a````b`,   which displays as [a````b] (yep...)
+    // `a```b`  => `a``````b`, which displays as [`a``````b`] (...yepp...)
+    // basically, once double-backticked, it stops being a metacharacter.
+    return strings.Replace(s, "`", "``", -1)
 }
 
 var linkMatcher    *regexp.Regexp = regexp.MustCompile(`(?i)<a target=_blank href="([^"]+)"[^>]*><font[^>]+>[^<]+<[^>]+><\\?/a>`)
@@ -113,7 +110,6 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (stri
             })
 
             // TODO: Why are we doing this twice??
-            preparedMessage = EscapeDiscordMetaCharacters(preparedMessage)
             tokens := html.NewTokenizer(strings.NewReader(preparedMessage))
             preparedMessage = ""
             loop:
