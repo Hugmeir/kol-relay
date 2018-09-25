@@ -300,7 +300,7 @@ type dmHandlers struct {
     cb func(*discordgo.Session, *discordgo.MessageCreate, []string, kolgo.KoLRelay)
 }
 
-func IsAdmin(s *discordgo.Session, m *discordgo.MessageCreate) bool {
+func IsAdminRole(s *discordgo.Session, m *discordgo.MessageCreate) bool {
     _, ok := administrators[m.Author.ID]
     if ok {
         return true
@@ -310,7 +310,7 @@ func IsAdmin(s *discordgo.Session, m *discordgo.MessageCreate) bool {
 }
 
 func SenderCanRunCommands(s *discordgo.Session, m *discordgo.MessageCreate) bool {
-    if IsAdmin(s, m) {
+    if IsAdminRole(s, m) {
         return true
     }
 
@@ -326,7 +326,13 @@ func HandleCommandForGame(s *discordgo.Session, m *discordgo.MessageCreate, matc
         return
     }
 
-    kol.SendCommand(matches[1], matches[2])
+    output, err := kol.SubmitChat(matches[1], matches[2])
+    if err != nil {
+        s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Command run FAILED, error: ```css\n%s\n```", err))
+        return
+    }
+
+    s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + string(output) + "\n```")
 }
 
 const killFile = "/tmp/kol-relay-KILL"
