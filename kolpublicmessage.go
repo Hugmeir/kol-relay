@@ -111,12 +111,11 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (stri
             return ``
         })
 
-        needInitialPadding := false
         if meMatch := slashMeMatcher.FindStringSubmatch(preparedMessage); len(meMatch) > 0 {
             // /me foo
             wrapAround["_"] = true
             preparedSender  = fmt.Sprintf("**`%s`**", meMatch[1])
-            needInitialPadding = true
+            preparedMessage = " " + meMatch[2] // message WITHOUT the username
         }
 
         tokens := html.NewTokenizer(strings.NewReader(preparedMessage))
@@ -131,10 +130,6 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (stri
                 preparedMessage = preparedMessage + string(tokens.Text())
             }
             // TODO: could grab colors & apply them in markdown
-        }
-
-        if needInitialPadding {
-            preparedMessage = " " + preparedMessage
         }
     }
 
