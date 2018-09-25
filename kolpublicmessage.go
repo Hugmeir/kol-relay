@@ -102,35 +102,39 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (stri
 
     if strings.HasPrefix(preparedMessage, "<") {
         // golden text, chat effects, etc.
+        preparedMessage = effectMatcher.ReplaceAllStringFunc(preparedMessage, func(t string) string {
+            if strings.Contains(t, `heart`) {
+                wrapAround[effectToCmd[`heart`]] = true
+            } else {
+                wrapAround[effectToCmd[`skull`]] = true
+            }
+            return ``
+        })
+
+        needInitialPadding := false
         if meMatch := slashMeMatcher.FindStringSubmatch(preparedMessage); len(meMatch) > 0 {
             // /me foo
             wrapAround["_"] = true
             preparedSender  = fmt.Sprintf("**`%s`**", meMatch[1])
-            preparedMessage = " " + meMatch[2]
-        } else {
-            preparedMessage = effectMatcher.ReplaceAllStringFunc(preparedMessage, func(t string) string {
-                if strings.Contains(t, `heart`) {
-                    wrapAround[effectToCmd[`heart`]] = true
-                } else {
-                    wrapAround[effectToCmd[`skull`]] = true
-                }
-                return ``
-            })
+            needInitialPadding = true
+        }
 
-            // TODO: Why are we doing this twice??
-            tokens := html.NewTokenizer(strings.NewReader(preparedMessage))
-            preparedMessage = ""
-            loop:
-            for {
-                tt := tokens.Next()
-                switch tt {
-                case html.ErrorToken:
-                    break loop
-                case html.TextToken:
-                    preparedMessage = preparedMessage + string(tokens.Text())
-                }
-                // TODO: could grab colors & apply them in markdown
+        tokens := html.NewTokenizer(strings.NewReader(preparedMessage))
+        preparedMessage = ""
+        loop:
+        for {
+            tt := tokens.Next()
+            switch tt {
+            case html.ErrorToken:
+                break loop
+            case html.TextToken:
+                preparedMessage = preparedMessage + string(tokens.Text())
             }
+            // TODO: could grab colors & apply them in markdown
+        }
+
+        if needInitialPadding {
+            preparedMessage = " " + preparedMessage
         }
     }
 
