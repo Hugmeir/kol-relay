@@ -23,6 +23,9 @@ func EscapeDiscordMetaCharacters(s string) string {
     // `a```b`  => `a``````b`, which displays as [`a``````b`] (...yepp...)
     // basically, once double-backticked, it stops being a metacharacter.
     s = strings.Replace(s, "`", "``", -1)
+    if s[0] == '`' {
+        s = " " + s
+    }
     if s[len(s)-1] == '`' {
         // Sigh... A backtick at the end of the string messes things up, so:
         s = s + " "
