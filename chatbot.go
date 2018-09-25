@@ -672,13 +672,13 @@ func HandleKoLEvent(kol kolgo.KoLRelay, message kolgo.ChatMessage) (string, erro
 
 type triggerTuple struct {
     re *regexp.Regexp
-    cb func(*discordgo.Session, *discordgo.MessageCreate, []string)
+    cb func(*discordgo.Session, *discordgo.MessageCreate, []string, kolgo.KoLRelay)
 }
 
 var bullshitTriggers = []triggerTuple {
     triggerTuple {
         regexp.MustCompile(`(?i)/whois\s+hugmeir`),
-        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
+        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
             if m.Author.Username == "hugmeir" {
                 return
             }
@@ -687,18 +687,20 @@ var bullshitTriggers = []triggerTuple {
     },
     triggerTuple {
         regexp.MustCompile(`(?i)^\s*Relay(?:Bot)?,?\s+tell\s+me\s+about\s+(.+)`),
-        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
+        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
             about := matches[1]
             if strings.Contains(about, "IO ERROR") {
                 s.ChannelMessageSend(m.ChannelID, "Still doing that, are you?  You'll want to talk to one of _those_ other bots")
             } else if strings.Contains(about, "verification") {
-                s.ChannelMessageSend(m.ChannelID, "The relay uses your discord username.  To make it use your in-game name, `/msg RelayBot Verify` in-game and follow the instructions")
+                msg := "The relay uses your discord username.  To make it use your in-game name, `/msg RelayBot Verify` in-game and follow the instructions"
+                s.ChannelMessageSend(m.ChannelID, msg)
+                kol.SendMessage(`/clan`, msg)
             }
         },
     },
 }
 
-func RandomBullshit(s *discordgo.Session, m *discordgo.MessageCreate ) {
+func RandomBullshit(s *discordgo.Session, m *discordgo.MessageCreate, kol kolgo.KoLRelay ) {
     content := m.Content
 
     for _, trigger := range bullshitTriggers {
@@ -707,7 +709,7 @@ func RandomBullshit(s *discordgo.Session, m *discordgo.MessageCreate ) {
         if len(matches) == 0 {
             continue
         }
-        trigger.cb(s, m, matches)
+        trigger.cb(s, m, matches, kol)
         return
     }
 }
@@ -780,7 +782,7 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
         return // respect the desire for silence
     }
 
-    go RandomBullshit(s, m)
+    go RandomBullshit(s, m, kol)
 
     author    := sanitizeForKoL(ResolveNickname(s, m))
     msgForKoL := sanitizeForKoL(msg)
