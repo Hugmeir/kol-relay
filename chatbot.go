@@ -335,6 +335,52 @@ func HandleCommandForGame(s *discordgo.Session, m *discordgo.MessageCreate, matc
     s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + string(output) + "\n```")
 }
 
+// TODO: Move this into kolgo and just steal the item list from mafia
+type ItemType int
+const (
+    Spleen ItemType = iota
+)
+type Item struct {
+    ID   string
+    Name string
+    Type ItemType
+}
+var itemNameToID map[string]*Item = map[string]*Item{
+    "sleaze wad": &Item{
+        ID:   "1455",
+        Name: "sleaze wad",
+        Type: Spleen,
+    },
+}
+var validItemID *regexp.Regexp = regexp.MustCompile(`\A[0-9]+\z`)
+func ValidItemID(itemID string) bool {
+    return validItemID.MatchString(itemID)
+}
+func HandleChewCommand(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+    if !SenderCanRunCommands(s, m) {
+        return
+    }
+
+    itemID         := matches[1]
+    actualItem, ok := itemNameToID[strings.ToLower(itemID)]
+    if ok {
+        itemID = actualItem.ID
+    }
+
+    if !ValidItemID(itemID) {
+        s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Sorry, don't know what to do with that item"))
+        return
+    }
+
+    output, err  := kol.InvSpleen(itemID)
+    if err != nil {
+        s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Command run FAILED, error: ```css\n%s\n```", err))
+        return
+    }
+
+    s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + string(output) + "\n```")
+}
+
 const killFile = "/tmp/kol-relay-KILL"
 
 var allDMHandlers = []dmHandlers {
@@ -404,6 +450,13 @@ var allDMHandlers = []dmHandlers {
                 s.ChannelMessageSend(m.ChannelID, "That would've totes done something if you had the rights to do the thing.")
             }
         },
+    },
+    dmHandlers {
+        // !cmd chew ITEMID
+        //
+        // Will make it chew (spleen-use) the item
+        regexp.MustCompile(`(?i)\A!(?:cmd|powerword)\s+chew\s+(.+)`),
+        HandleChewCommand,
     },
     dmHandlers {
         // !cmd spam on
