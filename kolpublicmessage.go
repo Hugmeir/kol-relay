@@ -34,7 +34,7 @@ func EscapeDiscordMetaCharacters(s string) string {
 }
 
 var linkMatcher    *regexp.Regexp = regexp.MustCompile(`(?i)<a target=_blank href="([^"]+)"[^>]*><font[^>]+>[^<]+<[^>]+><\\?/a>`)
-var brokenLinkRe   *regexp.Regexp = regexp.MustCompile(`(?i)(?:[a-z0-9-]+[a-z09]\.)+\s*+(?:c\s*o\s*m|n\s*e\s*t|o\s*r\s*g)\s*/((?:(?:\s[a-z0-9-]+|(?:[a-z0-9-]+ -)*)+/?)+)`)
+var brokenLinkRe   *regexp.Regexp = regexp.MustCompile(`(?i)(?:[a-z0-9-]+[a-z09]\.)+\s*(?:c\s*o\s*m|n\s*e\s*t|o\s*r\s*g)\s*/((?:(?:\s[a-z0-9-]+|(?:[a-z0-9-]+ -)*)+/?)+)`)
 func FixMangledChatLinks(a string) string {
     c := strings.Replace(a, `https:// `, `https://`, -1)
     c  = strings.Replace(c,  `http:// `, `http://`,  -1)
