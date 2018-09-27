@@ -393,6 +393,7 @@ func FormatGameOutput(o []byte) string {
 type ItemType int
 const (
     Spleen ItemType = iota
+    Usable
 )
 type Item struct {
     ID   string
@@ -405,10 +406,49 @@ var itemNameToID map[string]*Item = map[string]*Item{
         Name: "sleaze wad",
         Type: Spleen,
     },
+    "mojo filter": &Item{
+        ID: "2614",
+        Name: "mojo filter",
+        Type: Usable,
+    },
 }
 var validItemID *regexp.Regexp = regexp.MustCompile(`\A[0-9]+\z`)
 func ValidItemID(itemID string) bool {
     return validItemID.MatchString(itemID)
+}
+func HandleUseCommand(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+    if !SenderCanRunCommands(s, m) {
+        return
+    }
+
+    itemID         := matches[2]
+    quantityStr    := matches[1]
+    actualItem, ok := itemNameToID[strings.ToLower(itemID)]
+    if ok {
+        itemID = actualItem.ID
+    }
+
+    if !ValidItemID(itemID) {
+        s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Sorry, don't know what to do with that item"))
+        return
+    }
+
+    quantity := 1
+    q, err := strconv.Atoi(quantityStr)
+    if err == nil && q > 0 {
+        quantity = q
+    }
+
+    output, err  := kol.InvUse(itemID, quantity)
+    if err != nil {
+        s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Command run FAILED, error: ```css\n%s\n```", err))
+        return
+    }
+
+    formattedOutput := FormatGameOutput(output)
+
+    // TODO: escape `s!
+    s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + formattedOutput + "\n```")
 }
 func HandleChewCommand(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
     if !SenderCanRunCommands(s, m) {
@@ -507,6 +547,13 @@ var allDMHandlers = []dmHandlers {
                 s.ChannelMessageSend(m.ChannelID, "That would've totes done something if you had the rights to do the thing.")
             }
         },
+    },
+    dmHandlers {
+        // !cmd use AMOUNT ITEMID/[ITEM NAME]
+        //
+        // Will make it use the AMOUNT of ITEM
+        regexp.MustCompile(`(?i)\A!(?:cmd|powerword)\s+use\s+(\d)\s+(.+)`),
+        HandleUseCommand,
     },
     dmHandlers {
         // !cmd chew ITEMID
