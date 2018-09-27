@@ -11,6 +11,9 @@ import (
     "flag"
     "syscall"
 
+    "bytes"
+    "os/exec"
+
     "unicode"
     "unicode/utf8"
     "golang.org/x/text/unicode/norm"
@@ -46,6 +49,8 @@ func init() {
     _ = GetKoLConf()
     _ = GetDiscordConf()
     _ = GetRelayConf()
+
+    tryLynx = DetectLynx()
 }
 
 var dbConfJson, discordConfJson, kolConfJson, relayConfJson string
@@ -335,6 +340,55 @@ func HandleCommandForGame(s *discordgo.Session, m *discordgo.MessageCreate, matc
     s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + string(output) + "\n```")
 }
 
+var tryLynx bool = false
+func DetectLynx() bool {
+    str, err := exec.LookPath("lynx")
+    if err != nil {
+        return false
+    }
+
+    if str == "" {
+        return false
+    }
+
+    cmd := exec.Command("lynx", "-help")
+    var out bytes.Buffer
+    cmd.Stdout = &out
+    err  = cmd.Run()
+    if err != nil {
+        return false
+    }
+
+    if err != nil {
+        return false
+    }
+
+    if !strings.Contains(out.String(), `-dump`) {
+        return false
+    }
+
+    // What a gauntlet!
+    return true
+}
+
+// Try formatting the game output with lynx
+func FormatGameOutput(o []byte) string {
+    if !tryLynx {
+        return string(o)
+    }
+
+    cmd := exec.Command("lynx", "--dump", "--stdin")
+    cmd.Stdin = bytes.NewReader(o)
+    var out bytes.Buffer
+    cmd.Stdout = &out
+    err := cmd.Run()
+    if err != nil {
+        return string(o)
+    }
+
+    return out.String()
+}
+
 // TODO: Move this into kolgo and just steal the item list from mafia
 type ItemType int
 const (
@@ -378,7 +432,10 @@ func HandleChewCommand(s *discordgo.Session, m *discordgo.MessageCreate, matches
         return
     }
 
-    s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + string(output) + "\n```")
+    formattedOutput := FormatGameOutput(output)
+
+    // TODO: escape `s!
+    s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + formattedOutput + "\n```")
 }
 
 const killFile = "/tmp/kol-relay-KILL"
