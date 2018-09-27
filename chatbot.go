@@ -538,7 +538,7 @@ func HandleDM(s *discordgo.Session, m *discordgo.MessageCreate, kol kolgo.KoLRel
         re      := handler.re
         matches := re.FindStringSubmatch(m.Content)
         if len(matches) > 0 {
-            handler.cb(s, m, matches, kol)
+            go handler.cb(s, m, matches, kol)
             // One match per DM
             return
         }
