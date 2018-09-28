@@ -326,6 +326,19 @@ func SenderCanRunCommands(s *discordgo.Session, m *discordgo.MessageCreate) bool
     return false
 }
 
+func SenderIsModerator(s *discordgo.Session, m *discordgo.MessageCreate) bool {
+    if SenderCanRunCommands(s, m) {
+        return true
+    }
+
+    _, ok := moderators[m.Author.ID]
+    if ok {
+        return true
+    }
+
+    return false
+}
+
 func HandleCommandForGame(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
     if !SenderCanRunCommands(s, m) {
         return
@@ -494,6 +507,16 @@ var allDMHandlers = []dmHandlers {
         HandleCommandForGame,
     },
     dmHandlers {
+        // !cmd alias ...
+        //
+        // Does nothing.  !cmd alias only works on the main channel, to prevent
+        // stealthy names.
+        regexp.MustCompile(`(?i)!(?:cmd|powerword) alias`),
+        func (s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+            s.ChannelMessageSend(m.ChannelID, "To prevent shenanigans, the alias command only works on the main channel, NOT through direcct message")
+        },
+    },
+    dmHandlers {
         // !cmd Kill
         //
         // This is the killswitch for the relay.
@@ -614,9 +637,11 @@ func InsertNewNickname(discordId string, nick string) {
     }
     defer stmt.Close()
     res, err := stmt.Exec(nick, now, discordId)
-    if err != nil {
-        affected, _ := res.RowsAffected()
-        if affected > 0 {
+    if err == nil {
+        affected, err := res.RowsAffected()
+        if err != nil {
+            fmt.Println("Error when updating an existing row, almost certainly worth ignoring: %s", err)
+        } else if  affected > 0 {
             // This was an update!
             return
         }
@@ -630,13 +655,43 @@ func InsertNewNickname(discordId string, nick string) {
     defer stmt.Close()
     res, err = stmt.Exec(discordId, nick, now, now)
     if err != nil {
-        fmt.Println("Entirely saved to save details for ", discordId, nick)
+        fmt.Println("Entirely failed to save details for ", discordId, nick, err)
+        return
     }
 
-    affected, _ := res.RowsAffected()
-    if affected < 1 {
-        fmt.Println("Entirely saved to save details for ", discordId, nick)
+    affected, err := res.RowsAffected()
+    if err != nil {
+        fmt.Printf("Error when getting rows affected for %s (%s): %s", nick, discordId, err)
     }
+
+    if affected < 1 {
+        fmt.Println("Could not insert new row for %s (%s) ", nick, discordId)
+    }
+}
+
+func HandleAliasing(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+    discordName := matches[1]
+    kolName     := matches[2]
+
+    if !SenderIsModerator(s, m) {
+        s.ChannelMessageSend(m.ChannelID, "Naughty members will be reported")
+        return
+    }
+
+    mentions := m.Mentions
+    if len(mentions) != 1 {
+        s.ChannelMessageSend(m.ChannelID, "Your alias command seems broken, no clue what you meant to do")
+        return
+    }
+
+    discordID := mentions[0].ID
+    fmt.Printf("'%s' asked us to alias '%s' (id %s) to '%s'\n", m.Author.ID, discordName, discordID, kolName)
+
+    go InsertNewNickname(discordID, kolName)
+    // Put in our in-memory hash:
+    gameNameOverride.Store(discordID, kolName)
+    // Let 'em know:
+    s.ChannelMessageSend(m.ChannelID, "Alias registered.  Reflect on your mistakes.")
 }
 
 var verificationsPending sync.Map
@@ -802,6 +857,10 @@ var bullshitTriggers = []triggerTuple {
             }
         },
     },
+    triggerTuple {
+        regexp.MustCompile(`(?i)\A!(?:cmd|powerword) alias (.+) as (.+)\z`),
+        HandleAliasing,
+    },
 }
 
 func RandomBullshit(s *discordgo.Session, m *discordgo.MessageCreate, kol kolgo.KoLRelay ) {
@@ -908,7 +967,9 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
 }
 
 var administrators map[string]bool   = make(map[string]bool, 20)
+var moderators     map[string]bool   = make(map[string]bool, 20)
 var rankIDToName   map[string]string = make(map[string]string, 20)
+const discordModeratorRole = `Dabomox`
 func FleshenAdministrators(s *discordgo.Session, defaultDiscordChannel string, discordAdminRole string) {
     c, err := s.Channel(defaultDiscordChannel)
     if err != nil {
@@ -921,24 +982,30 @@ func FleshenAdministrators(s *discordgo.Session, defaultDiscordChannel string, d
         return
     }
 
-    nagusRole := ""
+    adminRole := ""
+    moderatorRole := ""
     for _, r := range guildRoles {
         rankIDToName["<@&" + r.ID + ">"] = r.Name
 
         if r.Name == discordAdminRole {
-            nagusRole = r.ID
+            adminRole = r.ID
+        }
+        if r.Name == discordModeratorRole {
+            moderatorRole = r.ID
         }
     }
 
-    if nagusRole == "" {
+    if adminRole == "" {
         return
     }
 
     for _, member := range g.Members {
         for _, roleName := range member.Roles {
-            if roleName == nagusRole {
+            if roleName == adminRole {
                 administrators[member.User.ID] = true
-                break
+                moderators[member.User.ID] = true
+            } else if roleName == moderatorRole {
+                moderators[member.User.ID] = true
             }
         }
     }
@@ -974,6 +1041,7 @@ func main() {
     // Cleanly close down the Discord session.
     defer dg.Close()
 
+    // TODO: probably broken due to accessing a map concurrently
     go FleshenAdministrators(dg, defaultDiscordChannel, discordConf.AdminRole)
 
     // Conenct to KoL
