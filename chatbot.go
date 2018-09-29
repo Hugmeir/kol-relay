@@ -861,6 +861,18 @@ var bullshitTriggers = []triggerTuple {
         regexp.MustCompile(`(?i)\A!(?:cmd|powerword) (?:alias|verif(?:y|ication)) (.+) (?:(?:as|to) )?(.+)\z`),
         HandleAliasing,
     },
+
+    // ALWAYS LAST
+    triggerTuple {
+        regexp.MustCompile(`(?i)\A!(?:cmd|powerword)\s+([a-zA-Z0-9]*)`),
+        func (s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+            cmd := matches[1]
+            if cmd == "" {
+                cmd = "unknown"
+            }
+            s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Speak loudly dear, I don't know what this '%s' command means", cmd))
+        },
+    },
 }
 
 func RandomBullshit(s *discordgo.Session, m *discordgo.MessageCreate, kol kolgo.KoLRelay ) {
