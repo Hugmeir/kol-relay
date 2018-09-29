@@ -858,7 +858,7 @@ var bullshitTriggers = []triggerTuple {
         },
     },
     triggerTuple {
-        regexp.MustCompile(`(?i)\A!(?:cmd|powerword) alias (.+) (?:as )?(.+)\z`),
+        regexp.MustCompile(`(?i)\A!(?:cmd|powerword) (?:alias|verif(?:y|ication)) (.+) (?:(?:as|to) )?(.+)\z`),
         HandleAliasing,
     },
 }
