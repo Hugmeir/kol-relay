@@ -44,7 +44,7 @@ func init() {
     flag.StringVar(&relayConfJson,   "relay_conf",   "", "Path to the the relay targets JSON file")
     flag.Parse()
 
-    LoadNameOverrides()
+    FleshenSQLData()
 
     _ = GetKoLConf()
     _ = GetDiscordConf()
@@ -147,9 +147,9 @@ func DbConf() *dbConf {
 
 
 var gameNameOverride sync.Map
+var alreadyGrumbledFast sync.Map
 
-
-func LoadNameOverrides() {
+func FleshenSQLData() {
     dbConf := DbConf()
     db, err := sql.Open(dbConf.DriverName, dbConf.DataSource)
     if err != nil {
@@ -161,25 +161,59 @@ func LoadNameOverrides() {
         panic(err)
     }
     // Nice, sqlite works
-    rows, err := db.Query("SELECT discord_id, nickname FROM discord_name_override")
-    if err != nil {
-        panic(err)
-    }
-    defer rows.Close()
-    for rows.Next() {
-        var discordId string
-        var nickname   string
-        err = rows.Scan(&discordId, &nickname)
+
+    var wg sync.WaitGroup
+
+    // Do a query to fleshen all the name overrides
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        rows, err := db.Query("SELECT discord_id, nickname FROM discord_name_override")
         if err != nil {
-            fmt.Println(err)
-            continue
+            panic(err)
         }
-        gameNameOverride.Store(discordId, nickname)
-    }
-    err = rows.Err()
-    if err != nil {
-        panic(err)
-    }
+        defer rows.Close()
+        for rows.Next() {
+            var discordId string
+            var nickname  string
+            err = rows.Scan(&discordId, &nickname)
+            if err != nil {
+                fmt.Println(err)
+                continue
+            }
+            gameNameOverride.Store(discordId, nickname)
+        }
+        err = rows.Err()
+        if err != nil {
+            panic(err)
+        }
+    }()
+
+    // Also do a query to fleshen the "your username & nickname differ, let me tell you why that sucks" list
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        rows, err := db.Query("SELECT discord_id FROM discord_name_differs")
+        if err != nil {
+            panic(err)
+        }
+        defer rows.Close()
+        for rows.Next() {
+            var discordId string
+            err = rows.Scan(&discordId)
+            if err != nil {
+                fmt.Println(err)
+                continue
+            }
+            alreadyGrumbledFast.Store(discordId, true)
+        }
+        err = rows.Err()
+        if err != nil {
+            panic(err)
+        }
+    }()
+
+    wg.Wait()
 }
 
 var globalStfu bool = false
@@ -209,40 +243,85 @@ func ResolveNickname(s *discordgo.Session, m *discordgo.MessageCreate) string {
         return result.(string)
     }
 
-    // TODO: worth checking if nickname != username and spamming?
+    go GrumbleIfNicknameAndUsernameDiffer(s, m)
 
     return m.Author.Username
 }
 
-/*
+func InsertNicknameGrumble(discordId string) {
+    // Put it in the in-memory cache first:
+    alreadyGrumbledFast.Store(discordId, true)
+
+    sqliteInsert.Lock()
+    defer sqliteInsert.Unlock()
+    dbConf := DbConf()
+    db, err := sql.Open(dbConf.DriverName, dbConf.DataSource)
+    if err != nil {
+        fmt.Println("Had an error opening kol_relay.db")
+        return
+    }
+    defer db.Close()
+
+    now := time.Now().Format(time.RFC3339)
+    stmt, err := db.Prepare("insert into discord_name_differs (`discord_id`, `row_created_at`, `row_updated_at`) values (?, ?, ?)")
+    if err != nil {
+        fmt.Println("Failed to retain that we already spammed", discordId, "so we will end up doing it again, reason:", err)
+        return
+    }
+    defer stmt.Close()
+    _, err = stmt.Exec(discordId, now, now)
+    if err != nil {
+        fmt.Println("Failed to retain that we already spammed", discordId, "so we will end up doing it again, reason:", err)
+        return
+    }
+
+    return
+}
+
+func GrumbleIfNicknameAndUsernameDiffer(s *discordgo.Session, m *discordgo.MessageCreate) {
+    _, ok := alreadyGrumbledFast.Load(m.Author.ID)
+    if ok {
+        return
+    }
+
     c, err := s.Channel(m.ChannelID)
     if err != nil {
-        return m.Author.Username
+        return
     }
 
     g, err := s.Guild(c.GuildID)
     if err != nil {
-        return m.Author.Username
+        return
     }
 
     for _, member := range g.Members {
         if m.Author.ID != member.User.ID {
             continue;
         }
-        if member.Nick != "" {
-            nick := member.Nick
-            if nick == m.Author.Username {
-                return nick
-            }
-            // Only return nickna
-            return member.Nick
+        if member.Nick == "" {
+            alreadyGrumbledFast.Store(m.Author.ID, true)
+            return // No nickname
         }
-        break;
-    }
+        nick := member.Nick
+        if strings.EqualFold(nick, m.Author.Username) {
+            alreadyGrumbledFast.Store(m.Author.ID, true)
+            return
+        }
 
-    return m.Author.Username // fallback
+        userChannel, err := s.UserChannelCreate(m.Author.ID)
+        if err != nil {
+            fmt.Println("Could not ping someone about their username, error: ", err)
+            return
+        }
+
+        // Okay, so their nickname differs from their username.  Have we poked them before?
+        go InsertNicknameGrumble(m.Author.ID)
+        msg := fmt.Sprintf("To prevent abuse, the relay has to use your discord username (%s) when showing messages in KoL, not your nickname (%s).\n\nTo make it use your in-game name, send it a private message in-game with this: `/msg RelayBot Verify` and follow the instructions.", m.Author.Username, nick)
+        s.ChannelMessageSend(userChannel.ID, msg)
+
+        return
+    }
 }
-*/
 
 func EmojiNoMore(s string) string {
     for i, w := 0, 0; i < len(s); i += w {
