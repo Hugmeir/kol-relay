@@ -87,11 +87,13 @@ func FixMangledChatLinks(a string) string {
 
 var effectMatcher  *regexp.Regexp = regexp.MustCompile(`(?i)<img src="[^"]+12x12(heart|skull)\.[^"]+"[^>]*>`)
 var slashMeMatcher *regexp.Regexp = regexp.MustCompile(`(?i)\A<b><i><a target=mainpane href=[^>]+><font color[^>]+>([^<]+)<\\?/b><\\?/font><\\?/a>(.+)<\\?/i>\z`)
-var effectToCmd    map[string]string = map[string]string{
-    "heart": `<:chatheart:493814910111842306>`,
-    "skull": `<:chatskull:493815533490143243>`,
+var effectToCmdDefaults  map[string]string = map[string]string{
+    // Defaults:
+    "heart": `🖤`,
+    "skull": `☠`,
+    "?": "",
 }
-func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (string, error) {
+func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effectToCmd map[string]string) (string, error) {
     rawMessage     := message.Msg;
     preparedSender  := fmt.Sprintf("**%s**: ", message.Who.Name)
     preparedMessage := html.UnescapeString(rawMessage)
@@ -103,11 +105,18 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (stri
     if strings.HasPrefix(preparedMessage, "<") {
         // golden text, chat effects, etc.
         preparedMessage = effectMatcher.ReplaceAllStringFunc(preparedMessage, func(t string) string {
+            wrapperType := "?"
             if strings.Contains(t, `heart`) {
-                wrapAround[effectToCmd[`heart`]] = true
-            } else {
-                wrapAround[effectToCmd[`skull`]] = true
+                wrapperType = `heart`
+            } else if strings.Contains(t, `skull`) {
+                wrapperType = `skull`
             }
+
+            c, ok := effectToCmd[wrapperType]
+            if !ok {
+                c = effectToCmdDefaults[wrapperType]
+            }
+            wrapAround[c] = true
             return ``
         })
 
@@ -144,8 +153,6 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (stri
     if message.Channel != "clan" {
         finalMsg = fmt.Sprintf("[%s] %s", message.Channel, finalMsg)
     }
-
-//    finalMsg = "<:chatheart:493814910111842306>" + finalMsg + "<:chatskull:493815533490143243>"
 
     return finalMsg, nil
 }

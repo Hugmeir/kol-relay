@@ -83,6 +83,7 @@ type DiscordConf struct {
     DiscordApiKey  string   `json:"discord_api_key"`
     AdminRole      string   `json:"admin_role"`
     ModeratorRoles []string `json:"moderator_roles"`
+    EffectTransform map[string]string `json:"effect_transforms"`
 }
 var readDiscordConf *DiscordConf
 func GetDiscordConf() *DiscordConf {
@@ -1183,7 +1184,7 @@ func main() {
             return
         }
 
-        toDiscord, err := HandleKoLPublicMessage(kol, message)
+        toDiscord, err := HandleKoLPublicMessage(kol, message, discordConf.EffectTransform)
         if err != nil {
             // TODO
             return
