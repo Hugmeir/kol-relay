@@ -80,8 +80,9 @@ func GetKoLConf() *KoLConf {
 }
 
 type DiscordConf struct {
-    DiscordApiKey string `json:"discord_api_key"`
-    AdminRole     string `json:"admin_role"`
+    DiscordApiKey  string   `json:"discord_api_key"`
+    AdminRole      string   `json:"admin_role"`
+    ModeratorRoles []string `json:"moderator_roles"`
 }
 var readDiscordConf *DiscordConf
 func GetDiscordConf() *DiscordConf {
@@ -1060,8 +1061,7 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
 var administrators map[string]bool   = make(map[string]bool, 20)
 var moderators     map[string]bool   = make(map[string]bool, 20)
 var rankIDToName   map[string]string = make(map[string]string, 20)
-const discordModeratorRole = `Dabomox`
-func FleshenAdministrators(s *discordgo.Session, defaultDiscordChannel string, discordAdminRole string) {
+func FleshenAdministrators(s *discordgo.Session, defaultDiscordChannel string, discordAdminRole string, discordModeratorRoles []string) {
     c, err := s.Channel(defaultDiscordChannel)
     if err != nil {
         return
@@ -1073,29 +1073,30 @@ func FleshenAdministrators(s *discordgo.Session, defaultDiscordChannel string, d
         return
     }
 
-    adminRole := ""
-    moderatorRole := ""
+    moderatorRoles := map [string]bool{}
+    for _, role := range discordModeratorRoles {
+        moderatorRoles[role] = true
+    }
+
+    adminRole := map[string]bool{}
+    moderatorRole := map[string]bool{}
     for _, r := range guildRoles {
         rankIDToName["<@&" + r.ID + ">"] = r.Name
 
         if r.Name == discordAdminRole {
-            adminRole = r.ID
+            adminRole[r.ID] = true
         }
-        if r.Name == discordModeratorRole {
-            moderatorRole = r.ID
+        if moderatorRoles[r.Name] {
+            moderatorRole[r.ID] = true
         }
-    }
-
-    if adminRole == "" {
-        return
     }
 
     for _, member := range g.Members {
         for _, roleName := range member.Roles {
-            if roleName == adminRole {
+            if _, ok := adminRole[roleName]; ok {
                 administrators[member.User.ID] = true
                 moderators[member.User.ID] = true
-            } else if roleName == moderatorRole {
+            } else if _, ok := moderatorRole[roleName]; ok {
                 moderators[member.User.ID] = true
             }
         }
@@ -1133,7 +1134,7 @@ func main() {
     defer dg.Close()
 
     // TODO: probably broken due to accessing a map concurrently
-    go FleshenAdministrators(dg, defaultDiscordChannel, discordConf.AdminRole)
+    go FleshenAdministrators(dg, defaultDiscordChannel, discordConf.AdminRole, discordConf.ModeratorRoles)
 
     // Conenct to KoL
     kol := kolgo.NewKoL(kolConf.Username, fromKoL)
