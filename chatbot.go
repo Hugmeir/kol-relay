@@ -1065,13 +1065,23 @@ var rankIDToName   map[string]string = make(map[string]string, 20)
 func FleshenAdministrators(s *discordgo.Session, defaultDiscordChannel string, discordAdminRole string, discordModeratorRoles []string) {
     c, err := s.Channel(defaultDiscordChannel)
     if err != nil {
+        fmt.Println("Could not resolve the default channel?!")
         return
     }
 
     g, err := s.Guild(c.GuildID)
-    guildRoles := g.Roles
     if err != nil {
+        fmt.Println("Could not resolve the default guild?!")
         return
+    }
+    guildRoles := g.Roles
+
+    if len(guildRoles) < 1 {
+        guildRoles, err = s.GuildRoles(c.GuildID)
+        if err != nil {
+            fmt.Println("Could not get the guild roles")
+            return
+        }
     }
 
     moderatorRoles := map [string]bool{}
