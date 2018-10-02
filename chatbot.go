@@ -1134,8 +1134,7 @@ func main() {
     // Cleanly close down the Discord session.
     defer dg.Close()
 
-    // TODO: probably broken due to accessing a map concurrently
-    go FleshenAdministrators(dg, defaultDiscordChannel, discordConf.AdminRole, discordConf.ModeratorRoles)
+    FleshenAdministrators(dg, defaultDiscordChannel, discordConf.AdminRole, discordConf.ModeratorRoles)
 
     // Conenct to KoL
     kol := kolgo.NewKoL(kolConf.Username, fromKoL)
