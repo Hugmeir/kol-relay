@@ -218,7 +218,7 @@ func FleshenSQLData() {
     wg.Wait()
 }
 
-var globalStfu bool = false
+var globalStfu = false
 func RelayToDiscord(dg *discordgo.Session, destChannel string, toDiscord string) {
     if globalStfu {
         return
@@ -339,7 +339,7 @@ func EmojiNoMore(s string) string {
 }
 
 // This should be [\p{Latin1}\p{ASCII}], but no such thing in golang
-var nonLatin1Re *regexp.Regexp = regexp.MustCompile(`[^\x00-\xff]`)
+var nonLatin1Re = regexp.MustCompile(`[^\x00-\xff]`)
 func ClearNonLatin1Characters(s string) string {
     // KoL chat only accepts the latin1 range:
     return nonLatin1Re.ReplaceAllString(s, ``)
@@ -420,7 +420,7 @@ func SenderIsModerator(s *discordgo.Session, m *discordgo.MessageCreate) bool {
     return false
 }
 
-var commandsThatReturnHTML map[string]bool = map[string]bool{
+var commandsThatReturnHTML = map[string]bool{
     "/who":   true,
     "/whois": true,
 }
@@ -450,7 +450,7 @@ func HandleCommandForGame(s *discordgo.Session, m *discordgo.MessageCreate, matc
     s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + gameOutput + "\n```")
 }
 
-var tryLynx bool = false
+var tryLynx = false
 func DetectLynx() bool {
     str, err := exec.LookPath("lynx")
     if err != nil {
@@ -510,7 +510,7 @@ type Item struct {
     Name string
     Type ItemType
 }
-var itemNameToID map[string]*Item = map[string]*Item{
+var itemNameToID = map[string]*Item{
     "sleaze wad": &Item{
         ID:   "1455",
         Name: "sleaze wad",
@@ -522,7 +522,7 @@ var itemNameToID map[string]*Item = map[string]*Item{
         Type: Usable,
     },
 }
-var validItemID *regexp.Regexp = regexp.MustCompile(`\A[0-9]+\z`)
+var validItemID = regexp.MustCompile(`\A[0-9]+\z`)
 func ValidItemID(itemID string) bool {
     return validItemID.MatchString(itemID)
 }
@@ -815,7 +815,7 @@ func HandleKoLSystemMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (stri
     return toDiscord, nil
 }
 
-var firstVerifyRe *regexp.Regexp = regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?!?`)
+var firstVerifyRe = regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?!?`)
 func HandleKoLDM(kol kolgo.KoLRelay, message kolgo.ChatMessage) (string, error) {
     if !firstVerifyRe.MatchString(message.Msg) {
         return "", nil
@@ -885,16 +885,16 @@ func ClearSnowball(kol kolgo.KoLRelay) (bool, error) {
     return true, nil
 }
 
-var partialStfu bool = false
-var jawBruiser *regexp.Regexp = regexp.MustCompile(`(?i)<a href='showplayer\.php\?who=([0-9]+)' [^>]+>([^<]+)<\/a> has hit you in the jaw with a piece of candy`)
+var partialStfu = false
+var jawBruiser = regexp.MustCompile(`(?i)<a href='showplayer\.php\?who=([0-9]+)' [^>]+>([^<]+)<\/a> has hit you in the jaw with a piece of candy`)
 
 /*
 {"msgs":[{"type":"event","msg":"That rotten jerk <a href='showplayer.php?who=3061055' target=mainpane class=nounder style='color: green'>Hugmeir<\/a> plastered you in the face with a snowball! Grr! Also, Brr!<!--refresh-->","link":false,"time":"1537390984"}],"last":"1468370925","delay":3000}
 */
-var snowBalled *regexp.Regexp = regexp.MustCompile(`(?i)<a href='showplayer\.php\?who=([0-9]+)' [^>]+>([^<]+)<\/a> plastered you in the face with a snowball`)
+var snowBalled = regexp.MustCompile(`(?i)<a href='showplayer\.php\?who=([0-9]+)' [^>]+>([^<]+)<\/a> plastered you in the face with a snowball`)
 
 /*{"msgs":[{"type":"event","msg":"A new announcement has been posted in your Clan Hall.","link":"clan_hall.php","time":"1538421708"}],"last":"1468905074","delay":3000}*/
-var clanAnnouncement *regexp.Regexp = regexp.MustCompile(`(?i)\AA new announcement has been posted in your Clan Hall\.\z`)
+var clanAnnouncement = regexp.MustCompile(`(?i)\AA new announcement has been posted in your Clan Hall\.\z`)
 func HandleKoLEvent(kol kolgo.KoLRelay, message kolgo.ChatMessage) (string, error) {
     matches := jawBruiser.FindStringSubmatch(message.Msg)
     if len(matches) > 0 {
@@ -1021,7 +1021,7 @@ e,"mention_everyone":false,"author":{"id":"289897239579459584","email":"","usern
 t":false},"attachments":[],"embeds":[],"mentions":[{"id":"289897239579459584","email":"","username":"hugmeir","avatar":"","discriminator":"0463","token":"","verified":false,"mfa_ena
 bled":false,"bot":false}],"reactions":null,"type":0}
 */
-var extraUnhandledMentions *regexp.Regexp = regexp.MustCompile(`(?i)<(:[^:]+:)[0-9]+>`)
+var extraUnhandledMentions = regexp.MustCompile(`(?i)<(:[^:]+:)[0-9]+>`)
 
 func ClearMoreUnhandledDiscordery(msg string) string {
     msg = extraUnhandledMentions.ReplaceAllString(msg, `$1`)
