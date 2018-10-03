@@ -420,18 +420,34 @@ func SenderIsModerator(s *discordgo.Session, m *discordgo.MessageCreate) bool {
     return false
 }
 
+var commandsThatReturnHTML map[string]bool = map[string]bool{
+    "/who":   true,
+    "/whois": true,
+}
 func HandleCommandForGame(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
     if !SenderCanRunCommands(s, m) {
         return
     }
 
-    output, err := kol.SubmitChat(matches[1], matches[2])
+    cmd  := matches[1]
+    args := matches[2]
+
+    output, err := kol.SubmitChat(cmd, args)
     if err != nil {
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Command run FAILED, error: ```css\n%s\n```", err))
         return
     }
 
-    s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + string(output) + "\n```")
+    _, shouldFormat := commandsThatReturnHTML[cmd]
+
+    var gameOutput string
+    if shouldFormat {
+        gameOutput = FormatGameOutput(output)
+    } else {
+        gameOutput = EscapeDiscordMetaCharacters(string(output))
+    }
+
+    s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + gameOutput + "\n```")
 }
 
 var tryLynx bool = false
@@ -468,7 +484,7 @@ func DetectLynx() bool {
 // Try formatting the game output with lynx
 func FormatGameOutput(o []byte) string {
     if !tryLynx {
-        return string(o)
+        return EscapeDiscordMetaCharacters(string(o))
     }
 
     cmd := exec.Command("lynx", "--dump", "--stdin")
@@ -477,10 +493,10 @@ func FormatGameOutput(o []byte) string {
     cmd.Stdout = &out
     err := cmd.Run()
     if err != nil {
-        return string(o)
+        return EscapeDiscordMetaCharacters(string(o))
     }
 
-    return out.String()
+    return EscapeDiscordMetaCharacters(out.String())
 }
 
 // TODO: Move this into kolgo and just steal the item list from mafia
@@ -541,7 +557,6 @@ func HandleUseCommand(s *discordgo.Session, m *discordgo.MessageCreate, matches 
 
     formattedOutput := FormatGameOutput(output)
 
-    // TODO: escape `s!
     s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + formattedOutput + "\n```")
 }
 func HandleChewCommand(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
@@ -568,7 +583,6 @@ func HandleChewCommand(s *discordgo.Session, m *discordgo.MessageCreate, matches
 
     formattedOutput := FormatGameOutput(output)
 
-    // TODO: escape `s!
     s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + formattedOutput + "\n```")
 }
 
