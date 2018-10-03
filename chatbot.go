@@ -27,6 +27,21 @@ import (
     "github.com/Hugmeir/kolgo"
 )
 
+type Chatbot struct {
+    KoL     kolgo.KoLRelay
+    Discord *discordgo.Session
+
+    NameOverride        sync.Map
+    GrumbledAt          sync.Map
+    VerificationPending sync.Map
+
+    GlobalStfu  bool
+    PartialStfu bool
+
+    KillFile string
+}
+
+const killFile = "/tmp/kol-relay-KILL"
 func init() {
     rand.Seed(time.Now().UnixNano())
 
@@ -41,7 +56,6 @@ func init() {
     flag.StringVar(&relayConfJson,   "relay_conf",   "", "Path to the the relay targets JSON file")
     flag.Parse()
 
-    FleshenSQLData()
 
     _ = GetKoLConf()
     _ = GetDiscordConf()
@@ -144,11 +158,7 @@ func DbConf() *dbConf {
     return cachedDbConf
 }
 
-
-var gameNameOverride sync.Map
-var alreadyGrumbledFast sync.Map
-
-func FleshenSQLData() {
+func (bot *Chatbot)FleshenSQLData() {
     dbConf := DbConf()
     db, err := sql.Open(dbConf.DriverName, dbConf.DataSource)
     if err != nil {
@@ -180,7 +190,7 @@ func FleshenSQLData() {
                 fmt.Println(err)
                 continue
             }
-            gameNameOverride.Store(discordId, nickname)
+            bot.NameOverride.Store(discordId, nickname)
         }
         err = rows.Err()
         if err != nil {
@@ -204,7 +214,7 @@ func FleshenSQLData() {
                 fmt.Println(err)
                 continue
             }
-            alreadyGrumbledFast.Store(discordId, true)
+            bot.GrumbledAt.Store(discordId, true)
         }
         err = rows.Err()
         if err != nil {
@@ -215,12 +225,11 @@ func FleshenSQLData() {
     wg.Wait()
 }
 
-var globalStfu = false
-func RelayToDiscord(dg *discordgo.Session, destChannel string, toDiscord string) {
-    if globalStfu {
+func (bot *Chatbot)RelayToDiscord(destChannel string, toDiscord string) {
+    if bot.GlobalStfu {
         return
     }
-    dg.ChannelMessageSend(destChannel, toDiscord)
+    bot.Discord.ChannelMessageSend(destChannel, toDiscord)
 }
 
 func NewDiscordConnection(botAPIKey string) *discordgo.Session {
@@ -234,22 +243,22 @@ func NewDiscordConnection(botAPIKey string) *discordgo.Session {
     return dg
 }
 
-func ResolveNickname(s *discordgo.Session, m *discordgo.MessageCreate) string {
+func (bot *Chatbot)ResolveNickname(s *discordgo.Session, m *discordgo.MessageCreate) string {
     id := m.Author.ID
 
-    result, ok := gameNameOverride.Load(id)
+    result, ok := bot.NameOverride.Load(id)
     if ok {
         return result.(string)
     }
 
-    go GrumbleIfNicknameAndUsernameDiffer(s, m)
+    go bot.GrumbleIfNicknameAndUsernameDiffer(s, m)
 
     return m.Author.Username
 }
 
-func InsertNicknameGrumble(discordId string) {
+func (bot *Chatbot)InsertNicknameGrumble(discordId string) {
     // Put it in the in-memory cache first:
-    alreadyGrumbledFast.Store(discordId, true)
+    bot.GrumbledAt.Store(discordId, true)
 
     sqliteInsert.Lock()
     defer sqliteInsert.Unlock()
@@ -277,8 +286,8 @@ func InsertNicknameGrumble(discordId string) {
     return
 }
 
-func GrumbleIfNicknameAndUsernameDiffer(s *discordgo.Session, m *discordgo.MessageCreate) {
-    _, ok := alreadyGrumbledFast.Load(m.Author.ID)
+func (bot *Chatbot)GrumbleIfNicknameAndUsernameDiffer(s *discordgo.Session, m *discordgo.MessageCreate) {
+    _, ok := bot.GrumbledAt.Load(m.Author.ID)
     if ok {
         return
     }
@@ -298,12 +307,12 @@ func GrumbleIfNicknameAndUsernameDiffer(s *discordgo.Session, m *discordgo.Messa
             continue;
         }
         if member.Nick == "" {
-            alreadyGrumbledFast.Store(m.Author.ID, true)
+            bot.GrumbledAt.Store(m.Author.ID, true)
             return // No nickname
         }
         nick := member.Nick
         if strings.EqualFold(nick, m.Author.Username) {
-            alreadyGrumbledFast.Store(m.Author.ID, true)
+            bot.GrumbledAt.Store(m.Author.ID, true)
             return
         }
 
@@ -314,7 +323,7 @@ func GrumbleIfNicknameAndUsernameDiffer(s *discordgo.Session, m *discordgo.Messa
         }
 
         // Okay, so their nickname differs from their username.  Have we poked them before?
-        go InsertNicknameGrumble(m.Author.ID)
+        go bot.InsertNicknameGrumble(m.Author.ID)
         msg := fmt.Sprintf("To prevent abuse, the relay has to use your discord username (%s) when showing messages in KoL, not your nickname (%s).\n\nTo make it use your in-game name, send it a private message in-game with this: `/msg RelayBot Verify` and follow the instructions.", m.Author.Username, nick)
         s.ChannelMessageSend(userChannel.ID, msg)
 
@@ -453,7 +462,7 @@ func InsertNewNickname(discordId string, nick string) {
     }
 }
 
-func HandleAliasing(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+func HandleAliasing(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
     discordName := matches[1]
     kolName     := matches[2]
 
@@ -473,17 +482,15 @@ func HandleAliasing(s *discordgo.Session, m *discordgo.MessageCreate, matches []
 
     go InsertNewNickname(discordID, kolName)
     // Put in our in-memory hash:
-    gameNameOverride.Store(discordID, kolName)
+    bot.NameOverride.Store(discordID, kolName)
     // Let 'em know:
     s.ChannelMessageSend(m.ChannelID, "Alias registered.  Reflect on your mistakes.")
 }
 
-var verificationsPending sync.Map
-
 /*
 {"msgs":[{"msg":"A new trivial update has been posted: You can now walk away from the intro choice in the Neverending Party if you want, like if you accidentally show up wearing the wrong shirt or something.","type":"system","mid":"1468408333","who":{"name":"System Message","id":"-1","color":""},"format":"2","channelcolor":"green","time":"1537455943"}],"last":"1468408333","delay":3000}
 */
-func HandleKoLSystemMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage) (string, error) {
+func (bot *Chatbot)HandleKoLSystemMessage(message kolgo.ChatMessage) (string, error) {
     msg := EscapeDiscordMetaCharacters(message.Msg)
     toDiscord := fmt.Sprintf("```css\n%s: %s\n```", message.Who.Name, msg)
     return toDiscord, nil
@@ -494,7 +501,8 @@ const (
     snowBall   = 718
 )
 
-func ClearJawBruiser(kol kolgo.KoLRelay) (bool, error) {
+func (bot *Chatbot)ClearJawBruiser() (bool, error) {
+    kol := bot.KoL
     body, err := kol.Uneffect(strconv.Itoa(bruisedJaw))
     if err != nil {
         return false, err
@@ -512,7 +520,8 @@ func ClearJawBruiser(kol kolgo.KoLRelay) (bool, error) {
     return true, nil
 }
 
-func ClearSnowball(kol kolgo.KoLRelay) (bool, error) {
+func (bot *Chatbot)ClearSnowball() (bool, error) {
+    kol := bot.KoL
     body, err := kol.Uneffect(strconv.Itoa(snowBall))
     if err != nil {
         return false, err
@@ -530,16 +539,15 @@ func ClearSnowball(kol kolgo.KoLRelay) (bool, error) {
     return true, nil
 }
 
-var partialStfu = false
 type triggerTuple struct {
     re *regexp.Regexp
-    cb func(*discordgo.Session, *discordgo.MessageCreate, []string, kolgo.KoLRelay)
+    cb func(*Chatbot, *discordgo.Session, *discordgo.MessageCreate, []string)
 }
 
-var bullshitTriggers = []triggerTuple {
+var discordMessageTriggers = []triggerTuple {
     triggerTuple {
         regexp.MustCompile(`(?i)/whois\s+hugmeir`),
-        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+        func(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
             if m.Author.Username == "hugmeir" {
                 return
             }
@@ -548,14 +556,14 @@ var bullshitTriggers = []triggerTuple {
     },
     triggerTuple {
         regexp.MustCompile(`(?i)^\s*Relay(?:Bot)?,?\s+tell\s+me\s+about\s+(.+)`),
-        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+        func(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
             about := matches[1]
             if strings.Contains(about, "IO ERROR") {
                 s.ChannelMessageSend(m.ChannelID, "Still doing that, are you?  You'll want to talk to one of _those_ other bots")
             } else if strings.Contains(about, "verification") {
                 msg := "The relay uses your discord username.  To make it use your in-game name, `/msg RelayBot Verify` in-game and follow the instructions"
                 s.ChannelMessageSend(m.ChannelID, msg)
-                kol.SendMessage(`/clan`, msg)
+                bot.KoL.SendMessage(`/clan`, msg)
             }
         },
     },
@@ -567,7 +575,7 @@ var bullshitTriggers = []triggerTuple {
     // ALWAYS LAST
     triggerTuple {
         regexp.MustCompile(`(?i)\A!(?:cmd|powerword)\s+([a-zA-Z0-9]*)`),
-        func (s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+        func (bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
             cmd := matches[1]
             if cmd == "" {
                 cmd = "unknown"
@@ -577,16 +585,16 @@ var bullshitTriggers = []triggerTuple {
     },
 }
 
-func RandomBullshit(s *discordgo.Session, m *discordgo.MessageCreate, kol kolgo.KoLRelay ) {
+func (bot *Chatbot)DiscordMessageTriggers(s *discordgo.Session, m *discordgo.MessageCreate) {
     content := m.Content
 
-    for _, trigger := range bullshitTriggers {
+    for _, trigger := range discordMessageTriggers {
         re      := trigger.re
         matches := re.FindStringSubmatch(content)
         if len(matches) == 0 {
             continue
         }
-        trigger.cb(s, m, matches, kol)
+        trigger.cb(bot, s, m, matches)
         return
     }
 }
@@ -608,7 +616,7 @@ func ClearMoreUnhandledDiscordery(msg string) string {
     return msg
 }
 
-func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, fromDiscord *os.File, kol kolgo.KoLRelay) {
+func (bot *Chatbot)HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, fromDiscord *os.File) {
     if m.Author.ID == s.State.User.ID {
         // Ignore ourselves
         return
@@ -624,7 +632,7 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
     targetChannel, ok := relayConf["from_discord_to_kol"][m.ChannelID]
     if !ok {
         if dm, _ := ComesFromDM(s, m); dm {
-            HandleDM(s, m, kol)
+            bot.HandleDM(s, m)
         }
         return // Someone spoke in a channel we are not relaying
     }
@@ -655,15 +663,17 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
         return
     }
 
-    if globalStfu || partialStfu {
+    if bot.GlobalStfu || bot.PartialStfu {
         return // respect the desire for silence
     }
 
-    go RandomBullshit(s, m, kol)
+    go bot.DiscordMessageTriggers(s, m)
 
-    author    := sanitizeForKoL(ResolveNickname(s, m))
+    author    := sanitizeForKoL(bot.ResolveNickname(s, m))
     msgForKoL := sanitizeForKoL(msg)
     finalMsg  := author + ": " + msgForKoL
+
+    kol       := bot.KoL
 
     if len(finalMsg) > 200 {
         // Hm..
@@ -683,7 +693,10 @@ func HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.MessageCreate, 
 var administrators map[string]bool   = make(map[string]bool, 20)
 var moderators     map[string]bool   = make(map[string]bool, 20)
 var rankIDToName   map[string]string = make(map[string]string, 20)
-func FleshenAdministrators(s *discordgo.Session, defaultDiscordChannel string, discordAdminRole string, discordModeratorRoles []string) {
+func (bot *Chatbot)FleshenAdministrators(defaultDiscordChannel string, discordConf *DiscordConf) {
+    s := bot.Discord
+    discordAdminRole, discordModeratorRoles := discordConf.AdminRole, discordConf.ModeratorRoles
+
     c, err := s.Channel(defaultDiscordChannel)
     if err != nil {
         fmt.Println("Could not resolve the default channel?!")
@@ -735,6 +748,39 @@ func FleshenAdministrators(s *discordgo.Session, defaultDiscordChannel string, d
     }
 }
 
+func (bot *Chatbot)Cleanup() {
+    // Close down the Discord session.
+    defer bot.Discord.Close()
+
+    // Disconnect from KoL
+    defer bot.KoL.LogOut()
+}
+
+func NewChatbot(discordConf *DiscordConf, defaultDiscordChannel string, kolConf *KoLConf, fromKoL *os.File) *Chatbot {
+    // Connect to discord
+    dg := NewDiscordConnection(discordConf.DiscordApiKey)
+
+    // Conenct to KoL
+    kol := kolgo.NewKoL(kolConf.Username, fromKoL)
+    err := kol.LogIn(kolConf.Password)
+    if err != nil {
+        panic(err)
+    }
+
+    bot := &Chatbot{
+        KoL:         kol,
+        Discord:     dg,
+        GlobalStfu:  false,
+        PartialStfu: false,
+        KillFile:    killFile,
+    }
+
+    bot.FleshenSQLData()
+    bot.FleshenAdministrators(defaultDiscordChannel, discordConf)
+
+    return bot
+}
+
 func main() {
     fromDiscordLogfile := "/var/log/kol-relay/relay.log"
     fromKoLLogfile     := "/var/log/kol-relay/from_kol.log"
@@ -760,46 +806,33 @@ func main() {
     discordConf := GetDiscordConf()
     kolConf     := GetKoLConf()
 
-    // Connect to discord
-    dg := NewDiscordConnection(discordConf.DiscordApiKey)
-    // Cleanly close down the Discord session.
-    defer dg.Close()
-
-    FleshenAdministrators(dg, defaultDiscordChannel, discordConf.AdminRole, discordConf.ModeratorRoles)
-
-    // Conenct to KoL
-    kol := kolgo.NewKoL(kolConf.Username, fromKoL)
-    err  = kol.LogIn(kolConf.Password)
-    if err != nil {
-        panic(err)
-    }
-    // Cleanly disconnect from KoL
-    defer kol.LogOut()
+    bot := NewChatbot(discordConf, defaultDiscordChannel, kolConf, fromKoL)
+    defer bot.Cleanup()
 
     // This handler is called when the bot sees a message on discord
-    dg.AddHandler(func (s *discordgo.Session, m *discordgo.MessageCreate) {
-        HandleMessageFromDiscord(s, m, fromDiscord, kol)
+    bot.Discord.AddHandler(func (s *discordgo.Session, m *discordgo.MessageCreate) {
+        bot.HandleMessageFromDiscord(s, m, fromDiscord)
     })
 
     // Start the chat poller.
-    go kol.StartChatPoll(kolConf.Password)
-    go kol.StartMessagePoll(kolConf.Password)
+    go bot.KoL.StartChatPoll(kolConf.Password)
+    go bot.KoL.StartMessagePoll(kolConf.Password)
 
-    // Clear the Bruised Jaw effect.  If we fail, do not relay messages
+    // Clear the Bruised Jaw effect.  If we fail, do not relay bessages
     // from discord into kol
-    cleared, _ := ClearJawBruiser(kol)
+    cleared, _ := bot.ClearJawBruiser()
     if ! cleared {
         fmt.Println("Started up jawbruised, and could not clear it!")
-        partialStfu = true
+        bot.PartialStfu = true
     }
     // Clear the snowball effect.  No harm if we can't -- just a lousy
     // chat effect.
-    ClearSnowball(kol)
+    go bot.ClearSnowball()
 
     // Try sending the initial message to confirm that everything is working
     // NOTE: We use SubmitChat, not the "nicer" interface SendMessage here,
     // because want to die if this fails to send.
-    _, err = kol.SubmitChat("/msg hugmeir", "oh hai creator")
+    _, err = bot.KoL.SubmitChat("/msg hugmeir", "oh hai creator")
     if err != nil {
         fmt.Println("Cannot send initial message, something has gone wrong: %v", err)
         panic(err)
@@ -808,7 +841,7 @@ func main() {
     // This handler is called when we see a "public" message in KoL chat -- a public
     // message is basically anything that is not a private message (/msg), and event
     // (like getting hit with a jawbruiser) or a system message (trivial announcements)
-    kol.AddHandler(kolgo.Public, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
+    bot.KoL.AddHandler(kolgo.Public, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
         targetDiscordChannel, ok := relayConf["from_kol_to_discord"][message.Channel]
         if !ok {
             return
@@ -822,13 +855,13 @@ func main() {
         if toDiscord == "" {
             return
         }
-        RelayToDiscord(dg, targetDiscordChannel, toDiscord)
+        bot.RelayToDiscord(targetDiscordChannel, toDiscord)
     })
 
     // Called when we see a system message in KoL.  Currently untested because, well,
     // those are rare >.>
-    kol.AddHandler(kolgo.System, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
-        toDiscord, err := HandleKoLSystemMessage(kol, message)
+    bot.KoL.AddHandler(kolgo.System, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
+        toDiscord, err := bot.HandleKoLSystemMessage(message)
         if err != nil {
             // TODO
             return
@@ -836,12 +869,12 @@ func main() {
         if toDiscord == "" {
             return
         }
-        RelayToDiscord(dg, defaultDiscordChannel, toDiscord)
+        bot.RelayToDiscord(defaultDiscordChannel, toDiscord)
     })
 
     // Called when we get a private message in KoL
-    kol.AddHandler(kolgo.Private, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
-        toDiscord, err := HandleKoLDM(kol, message)
+    bot.KoL.AddHandler(kolgo.Private, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
+        toDiscord, err := bot.HandleKoLDM(message)
         if err != nil {
             // TODO
             return
@@ -849,12 +882,12 @@ func main() {
         if toDiscord == "" {
             return
         }
-        RelayToDiscord(dg, defaultDiscordChannel, toDiscord)
+        bot.RelayToDiscord(defaultDiscordChannel, toDiscord)
     })
 
     // Called when we see an 'event', like getting jawbruised or snowballed
-    kol.AddHandler(kolgo.Event, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
-        toDiscord, err := HandleKoLEvent(kol, message)
+    bot.KoL.AddHandler(kolgo.Event, func (kol kolgo.KoLRelay, message kolgo.ChatMessage) {
+        toDiscord, err := bot.HandleKoLEvent(message)
         if err != nil {
             // TODO
             return
@@ -862,7 +895,7 @@ func main() {
         if toDiscord == "" {
             return
         }
-        RelayToDiscord(dg, defaultDiscordChannel, toDiscord)
+        bot.RelayToDiscord(defaultDiscordChannel, toDiscord)
     })
 
     fmt.Println("Bot is now running.  Press CTRL-C to exit.")

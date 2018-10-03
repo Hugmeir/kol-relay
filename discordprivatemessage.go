@@ -10,23 +10,21 @@ import (
     "strings"
     "strconv"
     "github.com/bwmarrin/discordgo"
-    "github.com/Hugmeir/kolgo"
 )
 
 type dmHandlers struct {
     re *regexp.Regexp
-    cb func(*discordgo.Session, *discordgo.MessageCreate, []string, kolgo.KoLRelay)
+    cb func(*Chatbot, *discordgo.Session, *discordgo.MessageCreate, []string)
 }
 
-const killFile = "/tmp/kol-relay-KILL"
-func HandleVerification(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+func HandleVerification(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
     verificationCode := matches[1]
-    result, ok := verificationsPending.Load("Code:" + verificationCode)
+    result, ok := bot.VerificationPending.Load("Code:" + verificationCode)
     if ok {
         // Insert in the db:
         go InsertNewNickname(m.Author.ID, result.(string))
         // Put in our in-memory hash:
-        gameNameOverride.Store(m.Author.ID, result.(string))
+        bot.NameOverride.Store(m.Author.ID, result.(string))
         // Let 'em know:
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("That's you alright!  I'll call you %s from now on", result.(string)))
     } else {
@@ -39,7 +37,7 @@ var commandsThatReturnHTML = map[string]bool{
     "/who":   true,
     "/whois": true,
 }
-func HandleCommandForGame(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+func HandleCommandForGame(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
     if !SenderCanRunCommands(s, m) {
         return
     }
@@ -47,7 +45,7 @@ func HandleCommandForGame(s *discordgo.Session, m *discordgo.MessageCreate, matc
     cmd  := matches[1]
     args := matches[2]
 
-    output, err := kol.SubmitChat(cmd, args)
+    output, err := bot.KoL.SubmitChat(cmd, args)
     if err != nil {
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Command run FAILED, error: ```css\n%s\n```", err))
         return
@@ -141,7 +139,7 @@ var validItemID = regexp.MustCompile(`\A[0-9]+\z`)
 func ValidItemID(itemID string) bool {
     return validItemID.MatchString(itemID)
 }
-func HandleUseCommand(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+func HandleUseCommand(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
     if !SenderCanRunCommands(s, m) {
         return
     }
@@ -164,7 +162,7 @@ func HandleUseCommand(s *discordgo.Session, m *discordgo.MessageCreate, matches 
         quantity = q
     }
 
-    output, err  := kol.InvUse(itemID, quantity)
+    output, err  := bot.KoL.InvUse(itemID, quantity)
     if err != nil {
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Command run FAILED, error: ```css\n%s\n```", err))
         return
@@ -175,7 +173,7 @@ func HandleUseCommand(s *discordgo.Session, m *discordgo.MessageCreate, matches 
     s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + formattedOutput + "\n```")
 }
 
-func HandleChewCommand(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+func HandleChewCommand(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
     if !SenderCanRunCommands(s, m) {
         return
     }
@@ -191,7 +189,7 @@ func HandleChewCommand(s *discordgo.Session, m *discordgo.MessageCreate, matches
         return
     }
 
-    output, err  := kol.InvSpleen(itemID)
+    output, err  := bot.KoL.InvSpleen(itemID)
     if err != nil {
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Command run FAILED, error: ```css\n%s\n```", err))
         return
@@ -221,7 +219,7 @@ var allDMHandlers = []dmHandlers {
         // Does nothing.  !cmd alias only works on the main channel, to prevent
         // stealthy names.
         regexp.MustCompile(`(?i)!(?:cmd|powerword) alias`),
-        func (s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+        func (bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
             s.ChannelMessageSend(m.ChannelID, "To prevent shenanigans, the alias command only works on the main channel, NOT through direcct message")
         },
     },
@@ -235,13 +233,13 @@ var allDMHandlers = []dmHandlers {
         //
         // For use in emergencies!
         regexp.MustCompile(`(?i)\A!(?:cmd|powerword) Kill\z`),
-        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+        func(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
             if !SenderCanRunCommands(s, m) {
                 s.ChannelMessageSend(m.ChannelID, "That would've totes done something if you had the rights to do the thing.")
                 return
             }
 
-            _, err := os.OpenFile(killFile, os.O_RDONLY|os.O_CREATE, 0666)
+            _, err := os.OpenFile(bot.KillFile, os.O_RDONLY|os.O_CREATE, 0666)
             if err != nil {
                 s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Going down, but could not prevent respawning, so the bot will return in 5 minutes.  Reason given: %s", err))
             } else {
@@ -256,7 +254,7 @@ var allDMHandlers = []dmHandlers {
         // Will crash the relay.  It will come back in ~5 minutes or so.
         // Basically a 'did you turn it off and on again' command.
         regexp.MustCompile(`(?i)\A!(?:cmd|powerword) Crash\z`),
-        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+        func(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
             if SenderCanRunCommands(s, m) {
                 s.ChannelMessageSend(m.ChannelID, "Crashing, bot should return in ~5m")
                 panic(errors.New(fmt.Sprintf("Asked to crash by %s", m.Author.Username)))
@@ -271,9 +269,9 @@ var allDMHandlers = []dmHandlers {
         //
         // Will make it stop relaying messages.
         regexp.MustCompile(`(?i)\A!(?:cmd|powerword) (?:Relay(?:Bot),?\s+)?(?:stfu|stop)`),
-        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+        func(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
             if SenderCanRunCommands(s, m) {
-                globalStfu = true
+                bot.GlobalStfu = true
                 s.ChannelMessageSend(m.ChannelID, "Floodgates are CLOSED.  No messages will be relayed")
             } else {
                 s.ChannelMessageSend(m.ChannelID, "That would've totes done something if you had the rights to do the thing.")
@@ -300,10 +298,10 @@ var allDMHandlers = []dmHandlers {
         //
         // Will make it start relaying messages if previously stfu'd
         regexp.MustCompile(`(?i)\A!(?:cmd|powerword) (?:Relay(?:Bot),?\s+)?(?:spam on|start)`),
-        func(s *discordgo.Session, m *discordgo.MessageCreate, matches []string, kol kolgo.KoLRelay) {
+        func(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
             if SenderCanRunCommands(s, m) {
-                globalStfu  = false
-                partialStfu = false
+                bot.GlobalStfu  = false
+                bot.PartialStfu = false
                 s.ChannelMessageSend(m.ChannelID, "Floodgates are open")
             } else {
                 s.ChannelMessageSend(m.ChannelID, "That would've totes done something if you had the rights to do the thing.")
@@ -323,12 +321,12 @@ func ComesFromDM(s *discordgo.Session, m *discordgo.MessageCreate) (bool, error)
     return channel.Type == discordgo.ChannelTypeDM, nil
 }
 
-func HandleDM(s *discordgo.Session, m *discordgo.MessageCreate, kol kolgo.KoLRelay) {
+func (bot *Chatbot)HandleDM(s *discordgo.Session, m *discordgo.MessageCreate) {
     for _, handler := range allDMHandlers {
         re      := handler.re
         matches := re.FindStringSubmatch(m.Content)
         if len(matches) > 0 {
-            go handler.cb(s, m, matches, kol)
+            go handler.cb(bot, s, m, matches)
             // One match per DM
             return
         }
