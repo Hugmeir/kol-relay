@@ -27,10 +27,17 @@ import (
     "github.com/Hugmeir/kolgo"
 )
 
+type ExtraDiscordData struct {
+    RankIDToName   map[string]string
+    Administrators map[string]bool
+    Moderators     map[string]bool
+}
+
 type Chatbot struct {
     KoL     kolgo.KoLRelay
     Discord *discordgo.Session
 
+    DiscordExtra        *ExtraDiscordData
     NameOverride        sync.Map
     GrumbledAt          sync.Map
     VerificationPending sync.Map
@@ -49,14 +56,15 @@ func init() {
         panic(errors.New("Killfile exists, refusing to start"))
     }
 
-
+    // Get all the config files from arguments
     flag.StringVar(&dbConfJson,      "db_conf",      "", "Path to the the database config JSON file")
     flag.StringVar(&discordConfJson, "discord_conf", "", "Path to the the discord config JSON file")
     flag.StringVar(&kolConfJson,     "kol_conf",     "", "Path to the the KoL config JSON file")
     flag.StringVar(&relayConfJson,   "relay_conf",   "", "Path to the the relay targets JSON file")
     flag.Parse()
 
-
+    // Open and read all of them; failing to read any is a panic
+    _ = DbConf()
     _ = GetKoLConf()
     _ = GetDiscordConf()
     _ = GetRelayConf()
@@ -376,8 +384,8 @@ func sanitizeForKoL (content string) string {
     return encoded
 }
 
-func IsAdminRole(s *discordgo.Session, m *discordgo.MessageCreate) bool {
-    _, ok := administrators[m.Author.ID]
+func (bot *Chatbot)IsAdminRole(s *discordgo.Session, m *discordgo.MessageCreate) bool {
+    _, ok := bot.DiscordExtra.Administrators[m.Author.ID]
     if ok {
         return true
     }
@@ -385,8 +393,8 @@ func IsAdminRole(s *discordgo.Session, m *discordgo.MessageCreate) bool {
     return false
 }
 
-func SenderCanRunCommands(s *discordgo.Session, m *discordgo.MessageCreate) bool {
-    if IsAdminRole(s, m) {
+func (bot *Chatbot)SenderCanRunCommands(s *discordgo.Session, m *discordgo.MessageCreate) bool {
+    if bot.IsAdminRole(s, m) {
         return true
     }
 
@@ -397,12 +405,12 @@ func SenderCanRunCommands(s *discordgo.Session, m *discordgo.MessageCreate) bool
     return false
 }
 
-func SenderIsModerator(s *discordgo.Session, m *discordgo.MessageCreate) bool {
-    if SenderCanRunCommands(s, m) {
+func (bot *Chatbot)SenderIsModerator(s *discordgo.Session, m *discordgo.MessageCreate) bool {
+    if bot.SenderCanRunCommands(s, m) {
         return true
     }
 
-    _, ok := moderators[m.Author.ID]
+    _, ok := bot.DiscordExtra.Moderators[m.Author.ID]
     if ok {
         return true
     }
@@ -466,7 +474,7 @@ func HandleAliasing(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCrea
     discordName := matches[1]
     kolName     := matches[2]
 
-    if !SenderIsModerator(s, m) {
+    if !bot.SenderIsModerator(s, m) {
         s.ChannelMessageSend(m.ChannelID, "Naughty members will be reported")
         return
     }
@@ -608,9 +616,9 @@ bled":false,"bot":false}],"reactions":null,"type":0}
 */
 var extraUnhandledMentions = regexp.MustCompile(`(?i)<(:[^:]+:)[0-9]+>`)
 
-func ClearMoreUnhandledDiscordery(msg string) string {
+func (bot *Chatbot)ClearMoreUnhandledDiscordery(msg string) string {
     msg = extraUnhandledMentions.ReplaceAllString(msg, `$1`)
-    for rank, name := range rankIDToName {
+    for rank, name := range bot.DiscordExtra.RankIDToName {
         msg = strings.Replace(msg, rank, name, -1)
     }
     return msg
@@ -645,7 +653,7 @@ func (bot *Chatbot)HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.M
         msg = m.ContentWithMentionsReplaced()
     }
 
-    msg = ClearMoreUnhandledDiscordery(msg)
+    msg = bot.ClearMoreUnhandledDiscordery(msg)
 
     if m.Attachments != nil && len(m.Attachments) > 0 {
         for _, attachment := range m.Attachments {
@@ -690,9 +698,6 @@ func (bot *Chatbot)HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.M
     kol.SendMessage(targetChannel, finalMsg)
 }
 
-var administrators map[string]bool   = make(map[string]bool, 20)
-var moderators     map[string]bool   = make(map[string]bool, 20)
-var rankIDToName   map[string]string = make(map[string]string, 20)
 func (bot *Chatbot)FleshenAdministrators(defaultDiscordChannel string, discordConf *DiscordConf) {
     s := bot.Discord
     discordAdminRole, discordModeratorRoles := discordConf.AdminRole, discordConf.ModeratorRoles
@@ -726,7 +731,7 @@ func (bot *Chatbot)FleshenAdministrators(defaultDiscordChannel string, discordCo
     adminRole := map[string]bool{}
     moderatorRole := map[string]bool{}
     for _, r := range guildRoles {
-        rankIDToName["<@&" + r.ID + ">"] = r.Name
+        bot.DiscordExtra.RankIDToName["<@&" + r.ID + ">"] = r.Name
 
         if r.Name == discordAdminRole {
             adminRole[r.ID] = true
@@ -739,10 +744,10 @@ func (bot *Chatbot)FleshenAdministrators(defaultDiscordChannel string, discordCo
     for _, member := range g.Members {
         for _, roleName := range member.Roles {
             if _, ok := adminRole[roleName]; ok {
-                administrators[member.User.ID] = true
-                moderators[member.User.ID] = true
+                bot.DiscordExtra.Administrators[member.User.ID] = true
+                bot.DiscordExtra.Moderators[member.User.ID] = true
             } else if _, ok := moderatorRole[roleName]; ok {
-                moderators[member.User.ID] = true
+                bot.DiscordExtra.Moderators[member.User.ID] = true
             }
         }
     }
@@ -773,6 +778,11 @@ func NewChatbot(discordConf *DiscordConf, defaultDiscordChannel string, kolConf 
         GlobalStfu:  false,
         PartialStfu: false,
         KillFile:    killFile,
+        DiscordExtra: &ExtraDiscordData{
+            make(map[string]string, 20),
+            make(map[string]bool, 20),
+            make(map[string]bool, 20),
+        },
     }
 
     bot.FleshenSQLData()

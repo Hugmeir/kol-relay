@@ -39,7 +39,7 @@ var commandsThatReturnHTML = map[string]bool{
     "/whois": true,
 }
 func HandleCommandForGame(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
-    if !SenderCanRunCommands(s, m) {
+    if !bot.SenderCanRunCommands(s, m) {
         return
     }
 
@@ -153,7 +153,7 @@ func ValidItemID(itemID string) bool {
     return validItemID.MatchString(itemID)
 }
 func HandleUseCommand(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
-    if !SenderCanRunCommands(s, m) {
+    if !bot.SenderCanRunCommands(s, m) {
         return
     }
 
@@ -187,7 +187,7 @@ func HandleUseCommand(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCr
 }
 
 func HandleChewCommand(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
-    if !SenderCanRunCommands(s, m) {
+    if !bot.SenderCanRunCommands(s, m) {
         return
     }
 
@@ -247,7 +247,7 @@ var allDMHandlers = []dmHandlers {
         // For use in emergencies!
         regexp.MustCompile(`(?i)\A!(?:cmd|powerword) Kill\z`),
         func(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
-            if !SenderCanRunCommands(s, m) {
+            if !bot.SenderCanRunCommands(s, m) {
                 s.ChannelMessageSend(m.ChannelID, "That would've totes done something if you had the rights to do the thing.")
                 return
             }
@@ -268,7 +268,7 @@ var allDMHandlers = []dmHandlers {
         // Basically a 'did you turn it off and on again' command.
         regexp.MustCompile(`(?i)\A!(?:cmd|powerword) Crash\z`),
         func(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
-            if SenderCanRunCommands(s, m) {
+            if bot.SenderCanRunCommands(s, m) {
                 s.ChannelMessageSend(m.ChannelID, "Crashing, bot should return in ~5m")
                 panic(errors.New(fmt.Sprintf("Asked to crash by %s", m.Author.Username)))
             } else {
@@ -283,7 +283,7 @@ var allDMHandlers = []dmHandlers {
         // Will make it stop relaying messages.
         regexp.MustCompile(`(?i)\A!(?:cmd|powerword) (?:Relay(?:Bot),?\s+)?(?:stfu|stop)`),
         func(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
-            if SenderCanRunCommands(s, m) {
+            if bot.SenderCanRunCommands(s, m) {
                 bot.GlobalStfu = true
                 s.ChannelMessageSend(m.ChannelID, "Floodgates are CLOSED.  No messages will be relayed")
             } else {
@@ -312,7 +312,7 @@ var allDMHandlers = []dmHandlers {
         // Will make it start relaying messages if previously stfu'd
         regexp.MustCompile(`(?i)\A!(?:cmd|powerword) (?:Relay(?:Bot),?\s+)?(?:spam on|start)`),
         func(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
-            if SenderCanRunCommands(s, m) {
+            if bot.SenderCanRunCommands(s, m) {
                 bot.GlobalStfu  = false
                 bot.PartialStfu = false
                 s.ChannelMessageSend(m.ChannelID, "Floodgates are open")
