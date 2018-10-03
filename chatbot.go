@@ -237,7 +237,11 @@ func (bot *Chatbot)RelayToDiscord(destChannel string, toDiscord string) {
     if bot.GlobalStfu {
         return
     }
-    bot.Discord.ChannelMessageSend(destChannel, toDiscord)
+    bot.Discord.ChannelTyping(destChannel)
+    go func() {
+        time.Sleep(200 * time.Millisecond)
+        bot.Discord.ChannelMessageSend(destChannel, toDiscord)
+    }()
 }
 
 func NewDiscordConnection(botAPIKey string) *discordgo.Session {
@@ -339,11 +343,16 @@ func (bot *Chatbot)GrumbleIfNicknameAndUsernameDiffer(s *discordgo.Session, m *d
     }
 }
 
+const maxEmoji = 3
 func EmojiNoMore(s string) string {
+    seenEmoji := 0
     for i, w := 0, 0; i < len(s); i += w {
         c, width := utf8.DecodeRuneInString(s[i:])
         w = width
         if c > 0xFF && unicode.IsSymbol(c) {
+            if seenEmoji++; seenEmoji > maxEmoji {
+                return "[Bunch of emojis]"
+            }
             name := runenames.Name(c)
             s = s[:i] + "[" + name + "]" + s[i+w:]
             w = len(name) + 2
