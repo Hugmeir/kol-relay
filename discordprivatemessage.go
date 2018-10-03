@@ -4,6 +4,7 @@ import (
     "fmt"
     "regexp"
     "os"
+    "encoding/json"
     "os/exec"
     "errors"
     "bytes"
@@ -45,19 +46,27 @@ func HandleCommandForGame(bot *Chatbot, s *discordgo.Session, m *discordgo.Messa
     cmd  := matches[1]
     args := matches[2]
 
-    output, err := bot.KoL.SubmitChat(cmd, args)
+    body, err := bot.KoL.SubmitChat(cmd, args)
     if err != nil {
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Command run FAILED, error: ```css\n%s\n```", err))
         return
     }
 
-    _, shouldFormat := commandsThatReturnHTML[cmd]
-
     var gameOutput string
-    if shouldFormat {
-        gameOutput = FormatGameOutput(output)
-    } else {
-        gameOutput = EscapeDiscordMetaCharacters(string(output))
+    if _, shouldFormat := commandsThatReturnHTML[cmd]; shouldFormat {
+        var cmdJson map[string]interface{}
+        err = json.Unmarshal(body, &cmdJson)
+        if err == nil {
+            if output, ok := cmdJson[`output`]; ok {
+                gameOutput = EscapeDiscordMetaCharacters(FormatGameOutput([]byte(output.(string))))
+            }
+        } else {
+            fmt.Println("error decoding comamnd output: ", err)
+        }
+    }
+
+    if gameOutput == "" {
+        gameOutput = EscapeDiscordMetaCharacters(string(body))
     }
 
     s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + gameOutput + "\n```")
@@ -109,7 +118,11 @@ func FormatGameOutput(o []byte) string {
         return EscapeDiscordMetaCharacters(string(o))
     }
 
-    return EscapeDiscordMetaCharacters(out.String())
+    str := out.String()
+    // Cut off the 'References' which will point to nothing useful
+    idx := strings.Index(str, "\nReferences\n\n")
+    str = str[:idx]
+    return EscapeDiscordMetaCharacters(str)
 }
 
 // TODO: Move this into kolgo and just steal the item list from mafia
