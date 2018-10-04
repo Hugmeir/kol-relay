@@ -46,6 +46,8 @@ type Chatbot struct {
     PartialStfu bool
 
     KillFile string
+
+    Db *sql.DB
 }
 
 const killFile = "/tmp/kol-relay-KILL"
@@ -57,10 +59,11 @@ func init() {
     }
 
     // Get all the config files from arguments
-    flag.StringVar(&dbConfJson,      "db_conf",      "", "Path to the the database config JSON file")
-    flag.StringVar(&discordConfJson, "discord_conf", "", "Path to the the discord config JSON file")
-    flag.StringVar(&kolConfJson,     "kol_conf",     "", "Path to the the KoL config JSON file")
-    flag.StringVar(&relayConfJson,   "relay_conf",   "", "Path to the the relay targets JSON file")
+    flag.StringVar(&dbConfJson,      "db_conf",      "", "Path to the database config JSON file")
+    flag.StringVar(&discordConfJson, "discord_conf", "", "Path to the discord config JSON file")
+    flag.StringVar(&kolConfJson,     "kol_conf",     "", "Path to the KoL config JSON file")
+    flag.StringVar(&relayConfJson,   "relay_conf",   "", "Path to the relay targets JSON file")
+    flag.StringVar(&toilConfJson,    "toil_conf",    "", "Path to the KoL config JSON for the clan management bot")
     flag.Parse()
 
     // Open and read all of them; failing to read any is a panic
@@ -68,11 +71,36 @@ func init() {
     _ = GetKoLConf()
     _ = GetDiscordConf()
     _ = GetRelayConf()
+    _ = GetToilConf()
 
     tryLynx = DetectLynx()
 }
 
-var dbConfJson, discordConfJson, kolConfJson, relayConfJson string
+var dbConfJson, discordConfJson, kolConfJson, relayConfJson, toilConfJson string
+
+type toilBotConf struct {
+    Username string `json:"username"`
+    Password string `json:"password"`
+}
+var toilConf *toilBotConf
+func GetToilConf() *toilBotConf {
+    if toilConf != nil {
+        return toilConf
+    }
+
+    contents, err := ioutil.ReadFile(toilConfJson)
+    if err != nil {
+        panic(err)
+    }
+
+    toilConf = new(toilBotConf)
+    err = json.Unmarshal(contents, toilConf)
+    if err != nil {
+        panic(err)
+    }
+
+    return toilConf
+}
 
 type KoLConf struct {
     Username string `json:"username"`
@@ -167,17 +195,7 @@ func DbConf() *dbConf {
 }
 
 func (bot *Chatbot)FleshenSQLData() {
-    dbConf := DbConf()
-    db, err := sql.Open(dbConf.DriverName, dbConf.DataSource)
-    if err != nil {
-        panic(err)
-    }
-    defer db.Close()
-    err = db.Ping()
-    if err != nil {
-        panic(err)
-    }
-    // Nice, sqlite works
+    db := bot.Db
 
     var wg sync.WaitGroup
 
@@ -274,13 +292,7 @@ func (bot *Chatbot)InsertNicknameGrumble(discordId string) {
 
     sqliteInsert.Lock()
     defer sqliteInsert.Unlock()
-    dbConf := DbConf()
-    db, err := sql.Open(dbConf.DriverName, dbConf.DataSource)
-    if err != nil {
-        fmt.Println("Had an error opening kol_relay.db")
-        return
-    }
-    defer db.Close()
+    db := bot.Db
 
     now := time.Now().Format(time.RFC3339)
     stmt, err := db.Prepare("insert into discord_name_differs (`discord_id`, `row_created_at`, `row_updated_at`) values (?, ?, ?)")
@@ -428,16 +440,10 @@ func (bot *Chatbot)SenderIsModerator(s *discordgo.Session, m *discordgo.MessageC
 }
 
 var sqliteInsert sync.Mutex
-func InsertNewNickname(discordId string, nick string) {
+func (bot *Chatbot)InsertNewNickname(discordId string, nick string) {
     sqliteInsert.Lock()
     defer sqliteInsert.Unlock()
-    dbConf := DbConf()
-    db, err := sql.Open(dbConf.DriverName, dbConf.DataSource)
-    if err != nil {
-        fmt.Println("Had an error opening kol_relay.db")
-        return
-    }
-    defer db.Close()
+    db := bot.Db
 
     now := time.Now().Format(time.RFC3339)
     stmt, err := db.Prepare("update discord_name_override set nickname=?, row_updated_at=? WHERE discord_id=?")
@@ -497,7 +503,7 @@ func HandleAliasing(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCrea
     discordID := mentions[0].ID
     fmt.Printf("'%s' asked us to alias '%s' (id %s) to '%s'\n", m.Author.ID, discordName, discordID, kolName)
 
-    go InsertNewNickname(discordID, kolName)
+    go bot.InsertNewNickname(discordID, kolName)
     // Put in our in-memory hash:
     bot.NameOverride.Store(discordID, kolName)
     // Let 'em know:
@@ -768,6 +774,9 @@ func (bot *Chatbot)Cleanup() {
 
     // Disconnect from KoL
     defer bot.KoL.LogOut()
+
+    // Disconnect from SQLite
+    defer bot.Db.Close()
 }
 
 func NewChatbot(discordConf *DiscordConf, defaultDiscordChannel string, kolConf *KoLConf, fromKoL *os.File) *Chatbot {
@@ -781,19 +790,30 @@ func NewChatbot(discordConf *DiscordConf, defaultDiscordChannel string, kolConf 
         panic(err)
     }
 
+    dbConf := DbConf()
+    db, err := sql.Open(dbConf.DriverName, dbConf.DataSource)
+    if err != nil {
+        panic(err)
+    }
+    err = db.Ping()
+    if err != nil {
+        panic(err)
+    }
+    // Nice, sqlite works
+
     bot := &Chatbot{
         KoL:         kol,
         Discord:     dg,
         GlobalStfu:  false,
         PartialStfu: false,
         KillFile:    killFile,
+        Db:          db,
         DiscordExtra: &ExtraDiscordData{
             make(map[string]string, 20),
             make(map[string]bool, 20),
             make(map[string]bool, 20),
         },
     }
-
     bot.FleshenSQLData()
     bot.FleshenAdministrators(defaultDiscordChannel, discordConf)
 
@@ -916,6 +936,8 @@ func main() {
         }
         bot.RelayToDiscord(defaultDiscordChannel, toDiscord)
     })
+
+    go bot.PollClanApplications(defaultDiscordChannel, toilConf, bot.Db)
 
     fmt.Println("Bot is now running.  Press CTRL-C to exit.")
     sc := make(chan os.Signal, 1)

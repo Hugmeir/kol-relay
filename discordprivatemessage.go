@@ -23,7 +23,7 @@ func HandleVerification(bot *Chatbot, s *discordgo.Session, m *discordgo.Message
     result, ok := bot.VerificationPending.Load("Code:" + verificationCode)
     if ok {
         // Insert in the db:
-        go InsertNewNickname(m.Author.ID, result.(string))
+        go bot.InsertNewNickname(m.Author.ID, result.(string))
         // Put in our in-memory hash:
         bot.NameOverride.Store(m.Author.ID, result.(string))
         // Let 'em know:

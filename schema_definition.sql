@@ -13,5 +13,12 @@ CREATE TABLE `discord_name_differs` (
     `row_created_at` DATETIME NOT NULL,
     `row_updated_at` DATETIME NOT NULL
 );
+CREATE TABLE `kol_blacklist` (
+    `id` INTEGER PRIMARY KEY AUTOINCREMENT,
+    `player_name` TEXT NOT NULL,
+    `reason` TEXT DEFAULT "",
+    `row_created_at` DATETIME NOT NULL,
+    `row_updated_at` DATETIME NOT NULL
+);
 DELETE FROM sqlite_sequence;
 COMMIT;
