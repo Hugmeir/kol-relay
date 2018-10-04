@@ -121,7 +121,9 @@ func FormatGameOutput(o []byte) string {
     str := out.String()
     // Cut off the 'References' which will point to nothing useful
     idx := strings.Index(str, "\nReferences\n\n")
-    str = str[:idx]
+    if idx > 0 {
+        str = str[:idx]
+    }
     return EscapeDiscordMetaCharacters(str)
 }
 
