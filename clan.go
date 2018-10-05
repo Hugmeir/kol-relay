@@ -128,6 +128,13 @@ func (bot *Chatbot)PollClanApplications(announceChannel string, toilConf *toilBo
                         fmt.Println("Failed to accept an application: ", err)
                         continue
                     }
+                    // Okay, so that previous attempt failed, try one more time:
+                    body, err = kol.ClanProcessApplication(app.RequestID, true)
+                    if err != nil {
+                        // Failed again.  Sorry new person, you'll get skipped for now.
+                        fmt.Println("Failed to accept an application: ", err)
+                        continue
+                    }
                 }
                 if bytes.Contains(body, []byte(`You cannot accept new members into the clan.`)) {
                     toilbot.Stop = true
