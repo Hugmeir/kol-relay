@@ -34,7 +34,6 @@ func EscapeDiscordMetaCharacters(s string) string {
 }
 
 var linkMatcher    *regexp.Regexp = regexp.MustCompile(`(?i)<a target=_blank href="([^"]+)"[^>]*><font[^>]+>[^<]+<[^>]+><\\?/a>`)
-var brokenLinkRe   *regexp.Regexp = regexp.MustCompile(`(?i)https?://\s*(?:[a-z0-9_i \-]+[a-z09]\.)+\s*(?:c\s*o\s*m|n\s*e\s*t|o\s*r\s*g)\s*/((?:(?:\s[a-z0-9_-]+|(?:[a-z0-9-]+ [-_])*)+/?)+)`)
 func FixMangledChatLinks(a string) string {
     s := []byte(a)
 
@@ -45,12 +44,26 @@ func FixMangledChatLinks(a string) string {
             break
         }
 
-        // Grab the "good" url out of the <a> before we shift things around:
-        urlRaw     := s[loc[2]:loc[3]]
-        url        := []byte(regexp.QuoteMeta(string(urlRaw)))
-        url         = bytes.Replace(url, []byte(`/`), []byte(`\s*/\s*`), -1)
-        url         = bytes.Replace(url, []byte(`-`), []byte(`\s*-\s*`), -1)
-        urlRe, err := regexp.Compile(string(url))
+        // Grab the url first
+        urlRaw := make([]byte, loc[3] - loc[2])
+        copy(urlRaw, s[loc[2]:loc[3]])
+
+        // Now get rid of the whole <a> eyesore:
+        // The following is the go way of doing this
+        // s = s[:loc[0]] + s[loc[1]:]
+        // One day...
+        s = s[:loc[0] + copy(s[loc[0]:], s[loc[1]+1:])]
+
+        // Now try replacing the shitty split url with the fixed version.
+        buffer := bytes.NewBufferString("")
+        for idx, b := range urlRaw {
+            q := regexp.QuoteMeta(string(b))
+            if idx != 0 {
+                buffer.WriteString(`\s*`)
+            }
+            buffer.WriteString(q)
+        }
+        urlRe, err := regexp.Compile(buffer.String())
         if err == nil {
             // If it failed to compile, meh, just ignore it; otherwise,
             // use the regex we just created to replace the broken urls
@@ -58,26 +71,6 @@ func FixMangledChatLinks(a string) string {
         } else {
             fmt.Println("Regexp failed to compile with ", err)
         }
-
-        // Now get rid of the whole <a> eyesore:
-        // The following is the go way of doing this
-        // s = s[:loc[0]] + s[loc[1]:]
-        // One day...
-        s = s[:loc[0] + copy(s[loc[0]:], s[loc[1]+1:])]
-    }
-
-    for max := 10; max > 1; max-- {
-        loc := brokenLinkRe.FindSubmatchIndex(s)
-        if len(loc) <= 0 {
-            // No matches!
-            break
-        }
-
-        fixedUrl := bytes.Replace(s[loc[2]:loc[3]], []byte(` `), []byte(``), -1)
-        //fmt.Println(fixedUrl)
-        //s = s[:loc[2] + copy(s[loc[2]:], s[loc[3]+1:])]
-        // ugh I can't get this to work
-        s = []byte(string(s[:loc[2]]) + string(fixedUrl) + string(s[loc[3]:]))
     }
 
     return string(s)
