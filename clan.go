@@ -10,9 +10,11 @@ import (
     "database/sql"
 )
 
+type handlerInterface func(ClanApplication)
 type ToilBot struct {
     KoL       kolgo.KoLRelay
     BlackList sync.Map
+    Handlers  sync.Map
     Stop      bool
 }
 
@@ -78,8 +80,11 @@ func (toil *ToilBot)BlacklistedName(n string) bool {
     return false
 }
 
-func (bot *Chatbot)PollClanApplications(announceChannel string, toilConf *toilBotConf, db *sql.DB) {
-    toilbot := NewToilBot(toilConf.Username, toilConf.Password, db)
+const (
+    AcceptedApplication = "Accept"
+)
+
+func (toilbot *ToilBot)PollClanApplications(toilConf *toilBotConf, bot *Chatbot) {
     ticker := time.NewTicker(5 * time.Minute)
     defer ticker.Stop()
     defer func() { fmt.Println("No longer polling for new applications") }()
@@ -120,7 +125,6 @@ func (bot *Chatbot)PollClanApplications(announceChannel string, toilConf *toilBo
 
                 _, month, day := time.Now().Date()
                 title := fmt.Sprintf("%02d/%02d awaiting Naming Day", int(month), day)
-                announcement := fmt.Sprintf(FCA_AnnounceKoLFmt, app.PlayerName, app.PlayerID)
 
                 body, err := kol.ClanProcessApplication(app.RequestID, true)
                 if err != nil {
@@ -147,12 +151,23 @@ func (bot *Chatbot)PollClanApplications(announceChannel string, toilConf *toilBo
                     continue
                 }
 
-                kol.SendKMail(app.PlayerName, FCA_WELCOME)
-                // Notice how Relay sends the message here, NOT Toil.  Toil does not
-                // have access to chat.
-                bot.KoL.SendMessage("/clan", announcement)
-                bot.Discord.ChannelMessageSend(announceChannel, announcement)
+                cbs, ok := toilbot.Handlers.Load(AcceptedApplication)
+                if !ok {
+                    continue
+                }
+
+                for _, cb := range cbs.([]handlerInterface) {
+                    go cb(app)
+                }
             }
     } }
 }
 
+func (toil *ToilBot)AddHandler(eventType string, cb handlerInterface) {
+    handlers, ok := toil.Handlers.Load(eventType)
+    if ok {
+        toil.Handlers.Store(eventType, append(handlers.([]handlerInterface), cb))
+    } else {
+        toil.Handlers.Store(eventType, []handlerInterface{cb})
+    }
+}

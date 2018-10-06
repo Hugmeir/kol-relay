@@ -937,7 +937,22 @@ func main() {
         bot.RelayToDiscord(defaultDiscordChannel, toDiscord)
     })
 
-    go bot.PollClanApplications(defaultDiscordChannel, toilConf, bot.Db)
+    toilbot := NewToilBot(toilConf.Username, toilConf.Password, bot.Db)
+    toilbot.AddHandler(AcceptedApplication, func (app ClanApplication) {
+        announcement := fmt.Sprintf(FCA_AnnounceKoLFmt, app.PlayerName, app.PlayerID)
+        // Nice, we got a new clannie.  Make relay send them the welcome kmail:
+        bot.KoL.SendKMail(app.PlayerName, FCA_WELCOME)
+        // And announce it in /clan & discord:
+        bot.KoL.SendMessage("/clan", announcement)
+        bot.Discord.ChannelMessageSend(defaultDiscordChannel, announcement)
+    })
+/*
+    toilbot.AddHandler(RejectedApplication, func (app *ClanApplication) {
+        // And announce it in /clan & discord:
+        bot.Discord.ChannelMessageSend(announceChannel, announcement)
+    })
+*/
+    go toilbot.PollClanApplications(toilConf, bot)
 
     fmt.Println("Bot is now running.  Press CTRL-C to exit.")
     sc := make(chan os.Signal, 1)
