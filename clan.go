@@ -19,9 +19,9 @@ type ToilBot struct {
 }
 
 func NewToilBot(username string, password string, db *sql.DB) *ToilBot {
-    kol := kolgo.NewKoL(username, nil)
+    kol := kolgo.NewKoL(username, password, nil)
 
-    err := kol.LogIn(password)
+    err := kol.LogIn()
     if err != nil {
         panic(err)
     }
@@ -96,7 +96,7 @@ func (toilbot *ToilBot)PollClanApplications(toilConf *toilBotConf, bot *Chatbot)
         case <-ticker.C:
             body, err := bot.KoL.ClanApplications()
             if err != nil {
-                fatalError := bot.KoL.HandleKoLException(err, toilConf.Password)
+                fatalError := bot.KoL.HandleKoLException(err)
                 if fatalError != nil {
                     fmt.Println("Unable to poll for new applications: ", err)
                     continue
@@ -116,7 +116,7 @@ func (toilbot *ToilBot)PollClanApplications(toilConf *toilBotConf, bot *Chatbot)
                     fmt.Printf("REJECTING application from blacklisted user %s\n", app.PlayerName)
                     _, err := kol.ClanProcessApplication(app.RequestID, false)
                     if err != nil {
-                        if err := kol.HandleKoLException(err, toilConf.Password); err != nil {
+                        if err := kol.HandleKoLException(err); err != nil {
                             fmt.Println("Failed to reject an application: ", err)
                         }
                     }
@@ -128,7 +128,7 @@ func (toilbot *ToilBot)PollClanApplications(toilConf *toilBotConf, bot *Chatbot)
 
                 body, err := kol.ClanProcessApplication(app.RequestID, true)
                 if err != nil {
-                    if err := kol.HandleKoLException(err, toilConf.Password); err != nil {
+                    if err := kol.HandleKoLException(err); err != nil {
                         fmt.Println("Failed to accept an application: ", err)
                         continue
                     }

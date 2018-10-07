@@ -784,8 +784,8 @@ func NewChatbot(discordConf *DiscordConf, defaultDiscordChannel string, kolConf 
     dg := NewDiscordConnection(discordConf.DiscordApiKey)
 
     // Conenct to KoL
-    kol := kolgo.NewKoL(kolConf.Username, fromKoL)
-    err := kol.LogIn(kolConf.Password)
+    kol := kolgo.NewKoL(kolConf.Username, kolConf.Password, fromKoL)
+    err := kol.LogIn()
     if err != nil {
         panic(err)
     }
@@ -854,8 +854,8 @@ func main() {
     })
 
     // Start the chat poller.
-    go bot.KoL.StartChatPoll(kolConf.Password)
-    go bot.KoL.StartMessagePoll(kolConf.Password)
+    go bot.KoL.StartChatPoll()
+    go bot.KoL.StartMessagePoll()
 
     // Clear the Bruised Jaw effect.  If we fail, do not relay bessages
     // from discord into kol
