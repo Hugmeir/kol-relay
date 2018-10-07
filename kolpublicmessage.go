@@ -114,7 +114,7 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effec
         if meMatch := slashMeMatcher.FindStringSubmatch(preparedMessage); len(meMatch) > 0 {
             // /me foo
             wrapAround["_"] = true
-            preparedSender  = fmt.Sprintf("**`%s`**", meMatch[1])
+            preparedSender  = fmt.Sprintf("**%s**", meMatch[1])
             preparedMessage = " " + meMatch[2] // message WITHOUT the username
         }
 
@@ -135,7 +135,7 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effec
 
     preparedMessage = EscapeDiscordMetaCharacters(preparedMessage)
 
-    finalMsg := fmt.Sprintf("%s`%s`", preparedSender, preparedMessage)
+    finalMsg := fmt.Sprintf("%s%s", preparedSender, preparedMessage)
 
     for wrap, _ := range wrapAround {
         finalMsg = wrap + finalMsg + wrap
