@@ -952,7 +952,7 @@ func main() {
         bot.Discord.ChannelMessageSend(announceChannel, announcement)
     })
 */
-    go toilbot.PollClanApplications(toilConf, bot)
+    go toilbot.PollClanManagement(bot)
 
     fmt.Println("Bot is now running.  Press CTRL-C to exit.")
     sc := make(chan os.Signal, 1)
