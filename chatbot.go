@@ -591,7 +591,7 @@ var discordMessageTriggers = []triggerTuple {
         },
     },
     triggerTuple {
-        regexp.MustCompile(`(?i)\A!(?:cmd|powerword) (?:alias|verif(?:y|ication)) (.+) (?:(?:as|to) )?(.+)\z`),
+        regexp.MustCompile(`(?i)\A!(?:cmd|powerword) (?:alias|verif(?:y|ication)) (<@![0-9]+>) (?:(?:as|to) )?(.+)\z`),
         HandleAliasing,
     },
 
