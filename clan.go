@@ -3,6 +3,7 @@ package main
 import (
     "fmt"
     "strings"
+    "strconv"
     "bytes"
     "time"
     "sync"
@@ -150,10 +151,82 @@ func (toilbot *ToilBot) CheckNewApplications(bot *Chatbot) {
     }
 }
 
+const FCA_PleasureSeeker = `5` // Pleasure Seeker
+const upgradeRank = `Silent Pleasure`
+func (toilbot *ToilBot) UpgradeSilentPleasures(clannies []ClanMember) {
+    toUpgrade := make([]ClanMember, 0, 10)
+
+    for _, member := range clannies {
+        if member.Rank != upgradeRank {
+            continue
+        }
+        if member.Title == "" {
+            continue // We probably failed to parse it because of bullshit inconsistent rules
+        }
+        toUpgrade = append(toUpgrade, member)
+    }
+
+    if len(toUpgrade) == 0 {
+        return
+    }
+
+    // TODO: can do these in bulk, and we SHOULD!  Abusing the server is BAD
+    kol := toilbot.KoL
+    for _, member := range toUpgrade {
+        body, err := kol.ClanModifyMember("1", member.ID, FCA_PleasureSeeker, member.Title)
+        if err != nil {
+            if fatalError := kol.HandleKoLException(err); fatalError != nil {
+                break
+            }
+            body, err = kol.ClanModifyMember("1", member.ID, FCA_PleasureSeeker, member.Title)
+            if err != nil {
+                break
+            }
+        }
+        body, err = kol.ClanAddWhitelist(member.Name, FCA_PleasureSeeker, member.Title)
+        if err != nil {
+            fmt.Println("Failed to whitelist: ", err, string(body))
+        }
+    }
+}
+
+func (toilbot *ToilBot) CheckMemberRankChanges(bot *Chatbot) {
+    page1, err := bot.KoL.ClanMembers("1")
+    if err != nil {
+        fmt.Println("Error polling for clan members: ", err)
+        return
+    }
+
+    clannies := DecodeClanMembers(page1)
+
+    totalPages := DecodeTotalMemberPages(page1)
+
+    for i := 2; i <= totalPages; i++ {
+        // We aren't in a rush, spread out the queries:
+        time.Sleep(5 * time.Second)
+        s := strconv.Itoa(i)
+        page, err := bot.KoL.ClanMembers(s)
+        if err != nil {
+            fmt.Printf("Could not query members page %s: %s", s, err)
+            continue
+        }
+        members := DecodeClanMembers(page)
+        clannies = append(clannies, members...)
+    }
+
+    // These two happen sequentially for good reasons:
+    toilbot.UpgradeSilentPleasures(clannies)
+//    toilbot.EnsureAllSeekersAreWhitelisted(clannies)
+
+    // TODO: inactives
+    // TODO: re-actives
+}
 
 func (toilbot *ToilBot)PollClanManagement(bot *Chatbot) {
     applicationsTicker := time.NewTicker(5 * time.Minute)
+    memberRankTicker   := time.NewTicker(2 * time.Hour)
     defer applicationsTicker.Stop()
+    defer memberRankTicker.Stop()
     defer func() { fmt.Println("No longer polling for new applications") }()
     for {
         if toilbot.Stop {
@@ -161,7 +234,9 @@ func (toilbot *ToilBot)PollClanManagement(bot *Chatbot) {
         }
         select {
             case <-applicationsTicker.C:
-                toilbot.CheckNewApplications(bot)
+                go toilbot.CheckNewApplications(bot)
+            case <-memberRankTicker.C:
+                go toilbot.CheckMemberRankChanges(bot)
     } }
 }
 
