@@ -784,7 +784,7 @@ func NewChatbot(discordConf *DiscordConf, defaultDiscordChannel string, kolConf 
     dg := NewDiscordConnection(discordConf.DiscordApiKey)
 
     // Conenct to KoL
-    kol := kolgo.NewKoL(kolConf.Username, kolConf.Password, fromKoL)
+    kol := kolgo.NewKoL(kolConf.Username +"/q", kolConf.Password, fromKoL)
     err := kol.LogIn()
     if err != nil {
         panic(err)
@@ -937,7 +937,7 @@ func main() {
         bot.RelayToDiscord(defaultDiscordChannel, toDiscord)
     })
 
-    toilbot := NewToilBot(toilConf.Username, toilConf.Password, bot.Db)
+    toilbot := NewToilBot(toilConf.Username + "/q", toilConf.Password, bot.Db)
     toilbot.AddHandler(AcceptedApplication, func (app ClanApplication) {
         announcement := fmt.Sprintf(FCA_AnnounceKoLFmt, app.PlayerName, app.PlayerID)
         // Nice, we got a new clannie.  Make relay send them the welcome kmail:
