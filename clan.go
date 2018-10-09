@@ -3,7 +3,6 @@ package main
 import (
     "fmt"
     "strings"
-    "strconv"
     "bytes"
     "time"
     "sync"
@@ -134,7 +133,15 @@ func (toilbot *ToilBot) CheckNewApplications(bot *Chatbot) {
             toilbot.Stop = true
             return
         }
-        body, err = kol.ClanModifyMember("1", app.PlayerID, FCA_FreshFish, title)
+        clannies := []kolgo.ClanMemberModification{
+            kolgo.ClanMemberModification{
+                ID:     app.PlayerID,
+                RankID: FCA_FreshFish,
+                Title:  title,
+            },
+        }
+        // TODO: use the bulk version!!
+        body, err = kol.ClanModifyMembers(clannies)
         if err != nil {
             fmt.Println("Failed to process an application: ", err)
             continue
@@ -154,7 +161,7 @@ func (toilbot *ToilBot) CheckNewApplications(bot *Chatbot) {
 const FCA_PleasureSeeker = `5` // Pleasure Seeker
 const upgradeRank = `Silent Pleasure`
 func (toilbot *ToilBot) UpgradeSilentPleasures(clannies []ClanMember) {
-    toUpgrade := make([]ClanMember, 0, 10)
+    mods := make([]kolgo.ClanMemberModification, 0, 10)
 
     for _, member := range clannies {
         if member.Rank != upgradeRank {
@@ -163,27 +170,44 @@ func (toilbot *ToilBot) UpgradeSilentPleasures(clannies []ClanMember) {
         if member.Title == "" {
             continue // We probably failed to parse it because of bullshit inconsistent rules
         }
-        toUpgrade = append(toUpgrade, member)
+
+        // Well... they will be, soon enough.
+        member.Rank = FCA_PleasureSeeker
+
+        mods = append(mods, kolgo.ClanMemberModification{
+            ID:     member.ID,
+            RankID: FCA_PleasureSeeker,
+            Title:  member.Title,
+        })
     }
 
-    if len(toUpgrade) == 0 {
+    if len(mods) == 0 {
         return
     }
 
-    // TODO: can do these in bulk, and we SHOULD!  Abusing the server is BAD
     kol := toilbot.KoL
-    for _, member := range toUpgrade {
-        body, err := kol.ClanModifyMember("1", member.ID, FCA_PleasureSeeker, member.Title)
-        if err != nil {
-            if fatalError := kol.HandleKoLException(err); fatalError != nil {
-                break
-            }
-            body, err = kol.ClanModifyMember("1", member.ID, FCA_PleasureSeeker, member.Title)
-            if err != nil {
-                break
-            }
+    body, err := kol.ClanModifyMembers(mods)
+    if err != nil {
+        if fatalError := kol.HandleKoLException(err); fatalError != nil {
+            break
         }
-        body, err = kol.ClanAddWhitelist(member.Name, FCA_PleasureSeeker, member.Title)
+        body, err = kol.ClanModifyMembers(mods)
+        if err != nil {
+            return
+        }
+    }
+}
+
+func (toilbot *ToilBot) EnsureAllSeekersAreWhitelisted(clannies []ClanMember) {
+    mods := make([]ClanMember, 0, 10)
+
+    if len(mods) == 0 {
+        return
+    }
+
+    for _, m := range mods {
+        time.Sleep(5 * time.Second) // No need to rush
+        body, err = kol.ClanAddWhitelist(member.Name, member.Rank, member.Title)
         if err != nil {
             fmt.Println("Failed to whitelist: ", err, string(body))
         }
@@ -191,7 +215,7 @@ func (toilbot *ToilBot) UpgradeSilentPleasures(clannies []ClanMember) {
 }
 
 func (toilbot *ToilBot) CheckMemberRankChanges(bot *Chatbot) {
-    page1, err := bot.KoL.ClanMembers("1")
+    page1, err := bot.KoL.ClanMembers(1)
     if err != nil {
         fmt.Println("Error polling for clan members: ", err)
         return
@@ -204,10 +228,9 @@ func (toilbot *ToilBot) CheckMemberRankChanges(bot *Chatbot) {
     for i := 2; i <= totalPages; i++ {
         // We aren't in a rush, spread out the queries:
         time.Sleep(5 * time.Second)
-        s := strconv.Itoa(i)
-        page, err := bot.KoL.ClanMembers(s)
+        page, err := bot.KoL.ClanMembers(i)
         if err != nil {
-            fmt.Printf("Could not query members page %s: %s", s, err)
+            fmt.Printf("Could not query members page %d: %s", i, err)
             continue
         }
         members := DecodeClanMembers(page)
@@ -216,7 +239,7 @@ func (toilbot *ToilBot) CheckMemberRankChanges(bot *Chatbot) {
 
     // These two happen sequentially for good reasons:
     toilbot.UpgradeSilentPleasures(clannies)
-//    toilbot.EnsureAllSeekersAreWhitelisted(clannies)
+    go toilbot.EnsureAllSeekersAreWhitelisted(clannies)
 
     // TODO: inactives
     // TODO: re-actives
