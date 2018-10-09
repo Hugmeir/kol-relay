@@ -9,31 +9,13 @@ import (
     "github.com/Hugmeir/kolgo"
 )
 
-// Sigh, discord, why...
-// We wrap all messages in ``s to prevent abuse.
-// So the only metacharacter we need to quote is '`'.  Even '\' is not a metacharacter.. unless
-// it comes at the start of a string, which is not a problem for us because we
-// precede all messages with the username.
-// Due to purist crap reasons, no positive lookbehind (?<=\\) or lookahead in the default regex
-// engine, and no recursive regexes either.
-// So just double down on the quotiness:
+var discordMeta = regexp.MustCompile("([\\_*~`])")
 func EscapeDiscordMetaCharacters(s string) string {
-    // `a`b`    => `a``b`,     which displays as [a``b]
-    // `a``b``  => `a````b`,   which displays as [a````b] (yep...)
-    // `a```b`  => `a``````b`, which displays as [`a``````b`] (...yepp...)
-    // basically, once double-backticked, it stops being a metacharacter.
-    s = strings.Replace(s, "`", "``", -1)
-    if s[0] == '`' {
-        s = " " + s
-    }
-    if s[len(s)-1] == '`' {
-        // Sigh... A backtick at the end of the string messes things up, so:
-        s = s + " "
-    }
+    s = discordMeta.ReplaceAllString(s, "\\$1")
     return s
 }
 
-var linkMatcher    *regexp.Regexp = regexp.MustCompile(`(?i)<a target=_blank href="([^"]+)"[^>]*><font[^>]+>[^<]+<[^>]+><\\?/a>`)
+var linkMatcher = regexp.MustCompile(`(?i)<a target=_blank href="([^"]+)"[^>]*><font[^>]+>[^<]+<[^>]+><\\?/a>`)
 func FixMangledChatLinks(a string) string {
     s := []byte(a)
 
@@ -76,8 +58,9 @@ func FixMangledChatLinks(a string) string {
     return string(s)
 }
 
-var effectMatcher  *regexp.Regexp = regexp.MustCompile(`(?i)<img src="[^"]+12x12(heart|skull)\.[^"]+"[^>]*>`)
-var slashMeMatcher *regexp.Regexp = regexp.MustCompile(`(?i)\A<b><i><a target=mainpane href=[^>]+><font color[^>]+>([^<]+)<\\?/b><\\?/font><\\?/a>(.+)<\\?/i>\z`)
+var effectMatcher  = regexp.MustCompile(`(?i)<img src="[^"]+12x12(heart|skull)\.[^"]+"[^>]*>`)
+var slashMeMatcher = regexp.MustCompile(`(?i)\A<b><i><a target=mainpane href=[^>]+><font color[^>]+>([^<]+)<\\?/b><\\?/font><\\?/a>(.+)<\\?/i>\z`)
+var captureItalics = regexp.MustCompile(`(?i)<i>((?:[^<]+|<\s*/?\s*[^i])+)</i>`)
 var effectToCmdDefaults  map[string]string = map[string]string{
     // Defaults:
     "heart": `🖤`,
@@ -85,9 +68,8 @@ var effectToCmdDefaults  map[string]string = map[string]string{
     "?": "",
 }
 func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effectToCmd map[string]string) (string, error) {
-    rawMessage     := message.Msg;
+    preparedMessage := message.Msg;
     preparedSender  := fmt.Sprintf("**%s**: ", message.Who.Name)
-    preparedMessage := html.UnescapeString(rawMessage)
 
     wrapAround := make(map[string]bool, 3)
 
@@ -133,6 +115,9 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effec
         }
     }
 
+    preparedMessage = captureItalics.ReplaceAllString(preparedMessage, `*$1*`)
+
+    preparedMessage = html.UnescapeString(preparedMessage)
     preparedMessage = EscapeDiscordMetaCharacters(preparedMessage)
 
     finalMsg := fmt.Sprintf("%s%s", preparedSender, preparedMessage)
