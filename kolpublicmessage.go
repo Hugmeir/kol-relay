@@ -115,10 +115,11 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effec
         }
     }
 
+    preparedMessage = EscapeDiscordMetaCharacters(preparedMessage)
+
     preparedMessage = captureItalics.ReplaceAllString(preparedMessage, `*$1*`)
 
     preparedMessage = html.UnescapeString(preparedMessage)
-    preparedMessage = EscapeDiscordMetaCharacters(preparedMessage)
 
     finalMsg := fmt.Sprintf("%s%s", preparedSender, preparedMessage)
 
