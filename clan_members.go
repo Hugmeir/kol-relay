@@ -3,8 +3,6 @@ package main
 import (
     "regexp"
     "strconv"
-    "bytes"
-    "golang.org/x/net/html"
 )
 
 type ClanMember struct {
@@ -12,6 +10,7 @@ type ClanMember struct {
     ID          string
     Rank        string
     Title       string
+    Inactive    bool
     RequestID   string
 }
 
@@ -33,87 +32,50 @@ func DecodeTotalMemberPages(b []byte) int {
     return i
 }
 
-var playerIDName = regexp.MustCompile(`showplayer\.php\?who=([0-9]+)['"][^>]*>`)
+// Screw using the html tokenizer forever, seriously
+var memberRe = `(?i)
+    <tr>                                                                     \s*
+        <td>                                                                 \s*
+            <input [^>]+>                                                    \s*
+            <a [^>]+ href=['"]showplayer\.php\?who=(?P<player_id>\d+)['"] [^>]*>   \s*
+                (?P<player_name>[^<]+)                                       \s*
+            </a>                                                             \s*
+            (<font [^>]+>\s*<b>\s*\Q(inactive)\E</b>\s*</font>\s*)*
+            (?:&nbsp;)*                                                      \s*
+        </td>                                                                \s*
+        <td>
+            (?P<rank>
+                  [^<]+
+                  | <select [^>]+> \s* (?:<option[^>]+>[^<]+</option>\s*)+</select>
+            ) \s*
+        </td>                                            \s*
+        <td>                                             \s*
+            <input [^>]+ value="(?P<title>[^"]*)"[^>]*>  \s*
+        </td>                                            \s*
+    </tr>
+`
+var memberMatcher = regexp.MustCompile(wsMatcher.ReplaceAllString(memberRe, ``))
 func DecodeClanMembers(b []byte) []ClanMember {
     clannies := make([]ClanMember, 0, 100)
-    tokens := html.NewTokenizer(bytes.NewReader(b))
-    loop:
-    for {
-        tt := tokens.Next()
-        switch tt {
-            case html.ErrorToken:
-                break loop
-            case html.StartTagToken:
-                t := tokens.Token()
-                if t.Data != "table" {
-                    continue
-                }
-                tt = tokens.Next()
-                if tt == html.TextToken {
-                    tt = tokens.Next()
-                }
+    matches  := memberMatcher.FindAllStringSubmatch(string(b), -1)
+    if len(matches) == 0 {
+        return clannies
+    }
 
-                if tt != html.StartTagToken {
-                    continue
-                }
-                t = tokens.Token()
-
-                if t.Data != "form" {
-                    continue
-                }
-
-                // finally.  Start parsing the entries.
-                for tokens.Token().Data != "table" {
-                    tt := tokens.Next()
-                    if tt == html.StartTagToken {
-                        t := tokens.Token()
-                        if t.Data != "td" {
-                            continue
-                        }
-                        tokens.Next()
-                        tokens.Next()
-                        innert  := tokens.Token()
-                        // If we have an <a>, we have hit gold
-                        if innert.Data != "a" {
-                            continue
-                        }
-
-                        raw := tokens.Raw()
-                        matches := playerIDName.FindSubmatch(raw)
-                        if len(matches) < 2 {
-                            continue
-                        }
-
-                        playerID   := string(matches[1])
-
-                        tokens.Next()
-                        playerName := string(tokens.Text())
-
-                        // sigh...
-                        tokens.Next()
-                        tokens.Next()
-                        tokens.Next()
-                        tokens.Next()
-                        tokens.Next()
-                        playerRank := string(tokens.Text())
-
-                        tokens.Next()
-                        tokens.Next()
-                        tokens.Next()
-                        playerTitle := string(tokens.Text())
-                        current := ClanMember{
-                            Name:      playerName,
-                            ID:        playerID,
-                            Rank:      playerRank,
-                            Title:     playerTitle,
-                            RequestID: "request" + playerID,
-                        }
-                        clannies = append(clannies, current)
-                    } else if tt == html.ErrorToken {
-                        break
-                    }
-                }
+    for _, m := range matches {
+        id := m[1]
+        inactive := false
+        if m[3] != "" {
+            inactive = true
         }
+        clannies = append(clannies, ClanMember{
+            ID:        m[1],
+            Name:      m[2],
+            Inactive:  inactive,
+            Rank:      m[4],
+            Title:     m[5],
+            RequestID: "request" + id,
+        })
     }
     return clannies
 }

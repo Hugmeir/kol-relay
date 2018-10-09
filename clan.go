@@ -189,28 +189,59 @@ func (toilbot *ToilBot) UpgradeSilentPleasures(clannies []ClanMember) {
     body, err := kol.ClanModifyMembers(mods)
     if err != nil {
         if fatalError := kol.HandleKoLException(err); fatalError != nil {
-            break
+            return
         }
         body, err = kol.ClanModifyMembers(mods)
         if err != nil {
             return
         }
     }
+
+    // TODO: check if body contains the thing we need
+    if body != nil {
+        return
+    }
 }
 
-func (toilbot *ToilBot) EnsureAllSeekersAreWhitelisted(clannies []ClanMember) {
+func (toilbot *ToilBot) EnsureAllSeekersAreWhitelisted(bot *Chatbot, clannies []ClanMember) {
     mods := make([]ClanMember, 0, 10)
+
+    body, err := bot.KoL.ClanWhitelist()
+    if err != nil {
+        fmt.Println("Could not get the whitelist: ", err)
+        return
+    }
+
+    whitelisted := DecodeClanWhitelist(body)
+    clanniesWhitelisted := map[string]bool{}
+    for _, wl := range whitelisted {
+        clanniesWhitelisted[wl.ID] = true
+    }
+
+    for _, m := range clannies {
+        if _, ok := clanniesWhitelisted[m.ID]; ok {
+            continue
+        }
+        if m.Rank != FCA_PleasureSeeker {
+            continue
+        }
+
+        fmt.Println("Would have whitelisted ", m.Name)
+        //mods = append(mods, m)
+    }
 
     if len(mods) == 0 {
         return
     }
 
-    for _, m := range mods {
+    kol := toilbot.KoL
+    for _, member := range mods {
         time.Sleep(5 * time.Second) // No need to rush
-        body, err = kol.ClanAddWhitelist(member.Name, member.Rank, member.Title)
+        body, err := kol.ClanAddWhitelist(member.Name, member.Rank, member.Title)
         if err != nil {
             fmt.Println("Failed to whitelist: ", err, string(body))
         }
+        // TODO: check that body contains the 'we did it!' string
     }
 }
 
@@ -239,7 +270,7 @@ func (toilbot *ToilBot) CheckMemberRankChanges(bot *Chatbot) {
 
     // These two happen sequentially for good reasons:
     toilbot.UpgradeSilentPleasures(clannies)
-    go toilbot.EnsureAllSeekersAreWhitelisted(clannies)
+    go toilbot.EnsureAllSeekersAreWhitelisted(bot, clannies)
 
     // TODO: inactives
     // TODO: re-actives
