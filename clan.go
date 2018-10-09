@@ -10,6 +10,30 @@ import (
     "database/sql"
 )
 
+const MAX_TITLE_LENGTH = 40
+
+/*
+<select name="level2331078"><option value="0">Normal Member (°0)</option><option value="8">Debtor's Prison (°1)</option><option value="14">Dead Fish (°2)</option><option value="7">Inactive (°4)</option><option value="9">Fresh Fish (°6)</option><option value="18">Silent Pleasure (°25)</option><option value="5" selected="">Pleasure Seeker (°50)</option></select>
+*/
+var rankNameToID = map[string]string{
+    "Normal Member":   "0",
+    "Pleasure Seeker": "5",
+    "Inactive":        "7",
+    "Debtor's Prison": "8",
+    "Fresh Fish":      "9",
+    "Dead Fish":       "14",
+    "Silent Pleasure": "18",
+}
+
+var activeRankToInactive = map[string]string{
+    "Pleasure Seeker": "Inactive",
+    "Fresh Fish":      "Dead Fish",
+}
+var inactiveRankToActive = map[string]string{
+    "Inactive":  "Pleasure Seeker",
+    "Dead Fish": "Fresh Fish",
+}
+
 type handlerInterface func(ClanApplication)
 type ToilBot struct {
     KoL       kolgo.KoLRelay
@@ -158,7 +182,8 @@ func (toilbot *ToilBot) CheckNewApplications(bot *Chatbot) {
     }
 }
 
-const FCA_PleasureSeeker = `5` // Pleasure Seeker
+const FCA_PleasureSeekerID   = `5` // Pleasure Seeker
+const FCA_PleasureSeekerName = `Pleasure Seeker`
 const upgradeRank = `Silent Pleasure`
 func (toilbot *ToilBot) UpgradeSilentPleasures(clannies []ClanMember) {
     mods := make([]kolgo.ClanMemberModification, 0, 10)
@@ -172,11 +197,11 @@ func (toilbot *ToilBot) UpgradeSilentPleasures(clannies []ClanMember) {
         }
 
         // Well... they will be, soon enough.
-        member.Rank = FCA_PleasureSeeker
+        member.Rank = FCA_PleasureSeekerName
 
         mods = append(mods, kolgo.ClanMemberModification{
             ID:     member.ID,
-            RankID: FCA_PleasureSeeker,
+            RankID: FCA_PleasureSeekerID,
             Title:  member.Title,
         })
     }
@@ -222,12 +247,11 @@ func (toilbot *ToilBot) EnsureAllSeekersAreWhitelisted(bot *Chatbot, clannies []
         if _, ok := clanniesWhitelisted[m.ID]; ok {
             continue
         }
-        if m.Rank != FCA_PleasureSeeker {
+        if m.Rank != FCA_PleasureSeekerName {
             continue
         }
 
-        fmt.Println("Would have whitelisted ", m.Name)
-        //mods = append(mods, m)
+        mods = append(mods, m)
     }
 
     if len(mods) == 0 {
@@ -241,7 +265,9 @@ func (toilbot *ToilBot) EnsureAllSeekersAreWhitelisted(bot *Chatbot, clannies []
         if err != nil {
             fmt.Println("Failed to whitelist: ", err, string(body))
         }
-        // TODO: check that body contains the 'we did it!' string
+        if !bytes.Contains(body, []byte(`added to whitelist`)) {
+            fmt.Println("Failed to whitelist: ", member.Name, string(body))
+        }
     }
 }
 
@@ -268,12 +294,92 @@ func (toilbot *ToilBot) CheckMemberRankChanges(bot *Chatbot) {
         clannies = append(clannies, members...)
     }
 
-    // These two happen sequentially for good reasons:
+    // Sequence: Upgrade to pleasure seeker *first*, then
+    // do all the other stuff async
     toilbot.UpgradeSilentPleasures(clannies)
     go toilbot.EnsureAllSeekersAreWhitelisted(bot, clannies)
+    go toilbot.CheckActivesAndInactives(clannies)
+}
 
-    // TODO: inactives
-    // TODO: re-actives
+func (toilbot *ToilBot) CheckActivesAndInactives(clannies []ClanMember) {
+    mods := make([]kolgo.ClanMemberModification, 0, 10)
+
+    _, month, _ := time.Now().Date()
+    for _, member := range clannies {
+        if member.Inactive {
+            if _, ok := inactiveRankToActive[member.Rank]; ok {
+                // Already marked as inactive, just carry on
+                continue
+            }
+            newRank, ok := activeRankToInactive[member.Rank]
+            if !ok {
+                // We are not handling these.
+                continue
+            }
+
+            rankID, ok := rankNameToID[newRank]
+            if !ok {
+                fmt.Println("Rank misconfigured for ", newRank)
+                continue
+            }
+
+            newTitle := fmt.Sprintf("%d - %s", month, member.Title)
+            if len(newTitle) > 40 {
+                newTitle = newTitle[:40]
+            }
+            // newly inactive clannie.  Sadness.
+            mods = append(mods, kolgo.ClanMemberModification{
+                ID:     member.ID,
+                RankID: rankID,
+                Title:  newTitle,
+            })
+        } else {
+            newRank, ok := inactiveRankToActive[member.Rank]
+            if !ok {
+                // Active and in an active rank.
+                continue
+            }
+
+            // Ooh, active but with an inactive rank.  Welcome back!
+            newRankID, ok := rankNameToID[newRank]
+            if !ok {
+                fmt.Println("Misconfigured rank: ", newRank)
+                continue
+            }
+
+            title := member.Title
+            idx := strings.Index(title, " - ")
+            if idx >= 0 {
+                title = title[idx+3:]
+            }
+            mods = append(mods, kolgo.ClanMemberModification{
+                ID:     member.ID,
+                RankID: newRankID,
+                Title:  title,
+            })
+        }
+    }
+
+    if len(mods) == 0 {
+        return
+    }
+
+    kol := toilbot.KoL
+    body, err := kol.ClanModifyMembers(mods)
+    if err != nil {
+        if fatalError := kol.HandleKoLException(err); fatalError != nil {
+            return
+        }
+        body, err = kol.ClanModifyMembers(mods)
+        if err != nil {
+            return
+        }
+    }
+
+    // TODO: check if body contains the thing we need
+    if body != nil {
+        return
+    }
 }
 
 func (toilbot *ToilBot)PollClanManagement(bot *Chatbot) {

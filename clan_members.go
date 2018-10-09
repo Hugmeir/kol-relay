@@ -2,6 +2,7 @@ package main
 
 import (
     "regexp"
+    "strings"
     "strconv"
 )
 
@@ -50,11 +51,16 @@ var memberRe = `(?i)
             ) \s*
         </td>                                            \s*
         <td>                                             \s*
-            <input [^>]+ value="(?P<title>[^"]*)"[^>]*>  \s*
+            (
+                  <input [^>]+ value="[^"]*"[^>]*>
+                | [^<]*
+            ) \s*
         </td>                                            \s*
     </tr>
 `
 var memberMatcher = regexp.MustCompile(wsMatcher.ReplaceAllString(memberRe, ``))
+var selectedRank  = regexp.MustCompile(`(?i)<option.+selected[^>]*>([^<]+)\s\([^)]+\)</option>`)
+var titleMatcher  = regexp.MustCompile(`(?i)<input[^>]+value="([^"]*")`)
 func DecodeClanMembers(b []byte) []ClanMember {
     clannies := make([]ClanMember, 0, 100)
     matches  := memberMatcher.FindAllStringSubmatch(string(b), -1)
@@ -68,12 +74,22 @@ func DecodeClanMembers(b []byte) []ClanMember {
         if m[3] != "" {
             inactive = true
         }
+        rank := m[4]
+        if strings.Contains(rank, `<select`) {
+            m2 := selectedRank.FindStringSubmatch(rank)
+            rank = m2[1]
+        }
+        title := m[5]
+        if strings.Contains(title, `<input`) {
+            m2 := titleMatcher.FindStringSubmatch(title)
+            title = m2[1]
+        }
         clannies = append(clannies, ClanMember{
-            ID:        m[1],
+            ID:        id,
             Name:      m[2],
             Inactive:  inactive,
-            Rank:      m[4],
-            Title:     m[5],
+            Rank:      rank,
+            Title:     title,
             RequestID: "request" + id,
         })
     }
