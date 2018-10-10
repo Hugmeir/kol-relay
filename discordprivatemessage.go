@@ -11,6 +11,7 @@ import (
     "strings"
     "strconv"
     "github.com/bwmarrin/discordgo"
+    "github.com/Hugmeir/kolgo"
 )
 
 type dmHandlers struct {
@@ -127,33 +128,24 @@ func FormatGameOutput(o []byte) string {
     return EscapeDiscordMetaCharacters(str)
 }
 
-// TODO: Move this into kolgo and just steal the item list from mafia
-type ItemType int
-const (
-    Spleen ItemType = iota
-    Usable
-)
-type Item struct {
-    ID   string
-    Name string
-    Type ItemType
-}
-var itemNameToID = map[string]*Item{
-    "sleaze wad": &Item{
-        ID:   "1455",
-        Name: "sleaze wad",
-        Type: Spleen,
-    },
-    "mojo filter": &Item{
-        ID: "2614",
-        Name: "mojo filter",
-        Type: Usable,
-    },
-}
 var validItemID = regexp.MustCompile(`\A[0-9]+\z`)
 func ValidItemID(itemID string) bool {
     return validItemID.MatchString(itemID)
 }
+func resolveItem(s string) (*kolgo.Item, error) {
+    var item *kolgo.Item
+    if ValidItemID(s) {
+        if id, err := strconv.Atoi(s); err != nil {
+            item, _ = kolgo.ToItem(id)
+            if item != nil {
+                return item, nil
+            }
+        }
+    }
+
+    return kolgo.ToItem(strings.ToLower(s))
+}
+
 func HandleUseCommand(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCreate, matches []string) {
     if !bot.SenderCanRunCommands(s, m) {
         return
@@ -161,12 +153,13 @@ func HandleUseCommand(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCr
 
     itemID         := matches[2]
     quantityStr    := matches[1]
-    actualItem, ok := itemNameToID[strings.ToLower(itemID)]
-    if ok {
-        itemID = actualItem.ID
-    }
 
-    if !ValidItemID(itemID) {
+    item, err := resolveItem(itemID)
+    if err != nil {
+        s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Sorry, don't know what to do with that item; got this error: %s", err))
+        return
+    }
+    if item == nil {
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Sorry, don't know what to do with that item"))
         return
     }
@@ -177,7 +170,7 @@ func HandleUseCommand(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCr
         quantity = q
     }
 
-    output, err  := bot.KoL.InvUse(itemID, quantity)
+    output, err  := bot.KoL.InvUse(item, quantity)
     if err != nil {
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Command run FAILED, error: ```css\n%s\n```", err))
         return
@@ -194,17 +187,18 @@ func HandleChewCommand(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageC
     }
 
     itemID         := matches[1]
-    actualItem, ok := itemNameToID[strings.ToLower(itemID)]
-    if ok {
-        itemID = actualItem.ID
-    }
 
-    if !ValidItemID(itemID) {
+    item, err := resolveItem(itemID)
+    if err != nil {
+        s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Sorry, don't know what to do with that item; got this error: %s", err))
+        return
+    }
+    if item == nil {
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Sorry, don't know what to do with that item"))
         return
     }
 
-    output, err  := bot.KoL.InvSpleen(itemID)
+    output, err  := bot.KoL.InvSpleen(item)
     if err != nil {
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Command run FAILED, error: ```css\n%s\n```", err))
         return
