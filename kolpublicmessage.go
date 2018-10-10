@@ -69,7 +69,7 @@ var effectToCmdDefaults  map[string]string = map[string]string{
 }
 func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effectToCmd map[string]string) (string, error) {
     preparedMessage := message.Msg;
-    preparedSender  := fmt.Sprintf("**%s**: ", message.Who.Name)
+    preparedSender  := fmt.Sprintf("**%s**: ", EscapeDiscordMetaCharacters(message.Who.Name))
 
     wrapAround := make(map[string]bool, 3)
 
@@ -96,7 +96,7 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effec
         if meMatch := slashMeMatcher.FindStringSubmatch(preparedMessage); len(meMatch) > 0 {
             // /me foo
             wrapAround["_"] = true
-            preparedSender  = fmt.Sprintf("**%s**", meMatch[1])
+            preparedSender  = fmt.Sprintf("**%s**", EscapeDiscordMetaCharacters(meMatch[1]))
             preparedMessage = " " + meMatch[2] // message WITHOUT the username
         }
 
