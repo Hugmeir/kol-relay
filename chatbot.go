@@ -64,6 +64,9 @@ func init() {
     flag.StringVar(&kolConfJson,     "kol_conf",     "", "Path to the KoL config JSON file")
     flag.StringVar(&relayConfJson,   "relay_conf",   "", "Path to the relay targets JSON file")
     flag.StringVar(&toilConfJson,    "toil_conf",    "", "Path to the KoL config JSON for the clan management bot")
+
+    flag.StringVar(&googleConfDir,    "google_conf_dir",    "", "Path to a dir holding credentials.json, token.json, and sheets.json")
+
     flag.Parse()
 
     // Open and read all of them; failing to read any is a panic
@@ -72,11 +75,38 @@ func init() {
     _ = GetDiscordConf()
     _ = GetRelayConf()
     _ = GetToilConf()
+    _ = GetGoogleSheetsConf()
 
     tryLynx = DetectLynx()
 }
 
-var dbConfJson, discordConfJson, kolConfJson, relayConfJson, toilConfJson string
+var dbConfJson, discordConfJson, kolConfJson, relayConfJson, toilConfJson, googleConfDir string
+
+var googleConf *GoogleSheetsConfig
+func GetGoogleSheetsConf() *GoogleSheetsConfig {
+    if googleConf != nil {
+        return googleConf
+    }
+
+    sheets_json, err := ioutil.ReadFile(googleConfDir + "/sheets.json")
+    if err != nil {
+        panic(err)
+    }
+
+    googleConf = new(GoogleSheetsConfig)
+    var sheetsConf map[string]string
+    err = json.Unmarshal(sheets_json, &sheetsConf)
+    if err != nil {
+        panic(err)
+    }
+
+    googleConf.CredentialsFile = googleConfDir + "/credentials.json"
+    googleConf.TokenFile       = googleConfDir + "/token.json"
+    googleConf.SpreadsheetId   = sheetsConf[`sheet_id`]
+    googleConf.ReadRange       = sheetsConf[`range`]
+
+    return googleConf
+}
 
 type toilBotConf struct {
     Username string `json:"username"`
@@ -947,7 +977,10 @@ func main() {
         bot.RelayToDiscord(defaultDiscordChannel, toDiscord)
     })
 
-    toilbot := NewToilBot(toilConf.Username + "/q", toilConf.Password, bot.Db)
+    googleSheetsConf := GetGoogleSheetsConf()
+    toilbot := NewToilBot(toilConf.Username + "/q", toilConf.Password, bot.Db, googleSheetsConf)
+    toilbot.MaintainBlacklist(bot)
+
     toilbot.AddHandler(AcceptedApplication, func (app ClanApplication) {
         announcement := fmt.Sprintf(FCA_AnnounceKoLFmt, app.PlayerName, app.PlayerID)
         // Nice, we got a new clannie.  Make relay send them the welcome kmail:

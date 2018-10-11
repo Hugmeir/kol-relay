@@ -37,12 +37,51 @@ var inactiveRankToActive = map[string]string{
 type handlerInterface func(ClanApplication)
 type ToilBot struct {
     KoL       kolgo.KoLRelay
+    GoogleSheetsConfig *GoogleSheetsConfig
     BlackList sync.Map
     Handlers  sync.Map
     Stop      bool
 }
 
-func NewToilBot(username string, password string, db *sql.DB) *ToilBot {
+func (toilbot *ToilBot)InsertBlacklist(name string, id string, reason string, db *sql.DB) {
+    // Try to skip the slightly slower SQL operation:
+    if id != "" {
+        if _, ok := toilbot.BlackList.Load("ID:" + id); ok {
+            return
+        }
+    }
+    if name != "" {
+        if _, ok := toilbot.BlackList.Load("Name:" + strings.ToLower(name)); ok {
+            return
+        }
+    }
+
+    toilbot.BlackList.Store("Name:" + strings.ToLower(name), true)
+    toilbot.BlackList.Store("ID:"   + id,                    true)
+
+    sqliteInsert.Lock()
+    defer sqliteInsert.Unlock()
+
+    now := time.Now().Format(time.RFC3339)
+    stmt, err := db.Prepare("INSERT INTO kol_blacklist (`unique_ident`, `account_name`, `account_number`, `reason`, `row_created_at`, `row_updated_at`) VALUES (?, ?, ?, ?, ?, ?)")
+    if err != nil {
+        fmt.Println("Failed to prepare an update for the local blacklist: ", err)
+        return
+    }
+    defer stmt.Close()
+
+    _, err = stmt.Exec(id + "|" + name, name, id, reason, now, now)
+    if err != nil {
+        if strings.Contains(err.Error(), `UNIQUE constraint failed`) {
+            return
+        }
+        fmt.Println("Failed to store to the local blacklist: ", err)
+        return
+    }
+    return
+}
+
+func NewToilBot(username string, password string, db *sql.DB, conf *GoogleSheetsConfig) *ToilBot {
     kol := kolgo.NewKoL(username, password, nil)
 
     err := kol.LogIn()
@@ -51,11 +90,12 @@ func NewToilBot(username string, password string, db *sql.DB) *ToilBot {
     }
 
     bot := &ToilBot{
-        KoL: kol,
-        Stop: false,
+        KoL:                kol,
+        GoogleSheetsConfig: conf,
+        Stop:               false,
     }
 
-    rows, err := db.Query("SELECT player_name FROM kol_blacklist")
+    rows, err := db.Query("SELECT account_name, account_number FROM kol_blacklist")
     if err != nil {
         bot.Stop = true
         return bot
@@ -63,12 +103,15 @@ func NewToilBot(username string, password string, db *sql.DB) *ToilBot {
     defer rows.Close()
     for rows.Next() {
         var playerName  string
-        err = rows.Scan(&playerName)
+        var playerID    string
+        err = rows.Scan(&playerName, &playerID)
         if err != nil {
             fmt.Println(err)
             continue
         }
-        bot.BlackList.Store(playerName, true)
+        // No need to foldcase
+        bot.BlackList.Store("Name:" + strings.ToLower(playerName), true)
+        bot.BlackList.Store("ID:"   + playerID,                    true)
     }
 
     return bot
@@ -85,19 +128,26 @@ Feel free to join the clan Discord: https://discord.gg/CmSfAgq`
 
 const FCA_AnnounceKoLFmt = `Player --> %s (#%s) was just accepted to the clan.`
 
-func (toil *ToilBot)BlacklistedName(n string) bool {
+func (toil *ToilBot)BlacklistedPlayer(n string, id string) bool {
+    bl := toil.BlackList
+
+    // Blacklisted ID?
+    if _, ok := bl.Load("ID:" + id); ok {
+        return true
+    }
+
     n = strings.ToLower(n)
-    if _, ok := toil.BlackList.Load(n); ok {
+    if _, ok := bl.Load("Name:" + n); ok {
         return true
     }
 
     n = strings.Replace(n, ` `, `_`, -1)
-    if _, ok := toil.BlackList.Load(n); ok {
+    if _, ok := bl.Load("Name:" + n); ok {
         return true
     }
 
     n = strings.Replace(n, `_`, ` `, -1)
-    if _, ok := toil.BlackList.Load(n); ok {
+    if _, ok := bl.Load("Name:" + n); ok {
         return true
     }
 
@@ -124,7 +174,7 @@ func (toilbot *ToilBot) CheckNewApplications(bot *Chatbot) {
     // proper clan management, we need to use the toilbot:
     kol := toilbot.KoL
     for _, app := range applications {
-        if toilbot.BlacklistedName(app.PlayerName) {
+        if toilbot.BlacklistedPlayer(app.PlayerName, app.PlayerID) {
             fmt.Printf("REJECTING application from blacklisted user %s\n", app.PlayerName)
             _, err := kol.ClanProcessApplication(app.RequestID, false)
             if err != nil {
@@ -382,9 +432,18 @@ func (toilbot *ToilBot) CheckActivesAndInactives(clannies []ClanMember) {
     }
 }
 
+func (toilbot *ToilBot)MaintainBlacklist(bot *Chatbot) {
+    blacklist := ReadBlacklist(toilbot.GoogleSheetsConfig)
+    for _, bl := range blacklist {
+        toilbot.InsertBlacklist(bl.Name, bl.ID, bl.Reason, bot.Db)
+    }
+}
+
 func (toilbot *ToilBot)PollClanManagement(bot *Chatbot) {
-    applicationsTicker := time.NewTicker(5 * time.Minute)
-    memberRankTicker   := time.NewTicker(2 * time.Hour)
+    blacklistTicker    := time.NewTicker(23 * time.Minute)
+    applicationsTicker := time.NewTicker(5  * time.Minute)
+    memberRankTicker   := time.NewTicker(2  * time.Hour)
+    defer blacklistTicker.Stop()
     defer applicationsTicker.Stop()
     defer memberRankTicker.Stop()
     defer func() { fmt.Println("No longer polling for new applications") }()
@@ -393,6 +452,8 @@ func (toilbot *ToilBot)PollClanManagement(bot *Chatbot) {
             return
         }
         select {
+            case <-blacklistTicker.C:
+                go toilbot.MaintainBlacklist(bot)
             case <-applicationsTicker.C:
                 go toilbot.CheckNewApplications(bot)
             case <-memberRankTicker.C:

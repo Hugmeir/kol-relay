@@ -15,7 +15,9 @@ CREATE TABLE `discord_name_differs` (
 );
 CREATE TABLE `kol_blacklist` (
     `id` INTEGER PRIMARY KEY AUTOINCREMENT,
-    `player_name` TEXT NOT NULL,
+    `account_name` TEXT NOT NULL,
+    `account_number` TEXT NOT NULL,
+    `unique_ident`   TEXT NOT NULL UNIQUE,
     `reason` TEXT DEFAULT "",
     `row_created_at` DATETIME NOT NULL,
     `row_updated_at` DATETIME NOT NULL
