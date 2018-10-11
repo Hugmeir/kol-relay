@@ -18,7 +18,12 @@ var kolEventHandlers = []kolEventHandler{
             senderId := matches[1]
             bot.KoL.SendMessage("/msg " + senderId, "C'mon, don't be a dick.")
 
-            cleared, _ := bot.ClearJawBruiser()
+            e := &Effect{
+                ID:   bruisedJaw,
+                Name: "Bruised Jaw",
+            }
+
+            cleared, _ := bot.Uneffect(e)
             toDiscord := fmt.Sprintf("%s (#%s) jawbruised the bot.", matches[2], matches[1])
             if ! cleared {
                 bot.PartialStfu = true
@@ -32,14 +37,40 @@ var kolEventHandlers = []kolEventHandler{
         /*
         {"msgs":[{"type":"event","msg":"That rotten jerk <a href='showplayer.php?who=3061055' target=mainpane class=nounder style='color: green'>Hugmeir<\/a> plastered you in the face with a snowball! Grr! Also, Brr!<!--refresh-->","link":false,"time":"1537390984"}],"last":"1468370925","delay":3000}
         */
-        regexp.MustCompile(`(?i)<a href='showplayer\.php\?who=([0-9]+)' [^>]+>([^<]+)<\/a> has hit you in the jaw with a piece of candy`),
+        regexp.MustCompile(`(?i)That rotten jerk <a href='showplayer\.php\?who=([0-9]+)' [^>]+>([^<]+)<\/a> plastered you`),
         func (bot *Chatbot, message kolgo.ChatMessage, matches []string) (string, error) {
             fmt.Printf("Hit by a snowball from %s (%s), raw message: %s", matches[1], matches[2], message.Msg)
             senderId := matches[1]
             bot.KoL.SendMessage("/msg " + senderId, "How about you don't?  That'll just be irritating for people reading chat.")
 
-            cleared, _ := bot.ClearSnowball()
+            e := &Effect{
+                ID:   snowBall,
+                Name: "B-b-brr!",
+            }
+
+            cleared, _ := bot.Uneffect(e)
             toDiscord := fmt.Sprintf("%s (#%s) threw a snowball at the bot.", matches[2], matches[1])
+            if ! cleared {
+                toDiscord = toDiscord + " And it could not be uneffected, so the relayed messages will get effects."
+            }
+            return toDiscord, nil
+        },
+    },
+    kolEventHandler {
+        /*demotivator*/
+        /* sent you a really unmotivating card */
+        regexp.MustCompile(`(?i)<a href='showplayer\.php\?who=([0-9]+)' [^>]+>([^<]+)<\/a> sent you a really unmotivating card`),
+        func (bot *Chatbot, message kolgo.ChatMessage, matches []string) (string, error) {
+            senderId := matches[1]
+            bot.KoL.SendMessage("/msg " + senderId, "Meh...")
+
+            e := &Effect{
+                ID:   unmotivated,
+                Name: "Unmotivated",
+            }
+
+            cleared, _ := bot.Uneffect(e)
+            toDiscord := fmt.Sprintf("%s (#%s) demotivated the bot.", matches[2], matches[1])
             if ! cleared {
                 toDiscord = toDiscord + " And it could not be uneffected, so the relayed messages will get effects."
             }

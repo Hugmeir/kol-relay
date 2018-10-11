@@ -5,6 +5,7 @@ import (
     "os/signal"
     "sync"
     "strconv"
+    "bytes"
     "regexp"
     "fmt"
     "time"
@@ -563,46 +564,35 @@ func (bot *Chatbot)HandleKoLSystemMessage(message kolgo.ChatMessage) (string, er
 }
 
 const (
-    bruisedJaw = 697
-    snowBall   = 718
+    bruisedJaw  = "697"
+    snowBall    = "718"
+    unmotivated = "795"
 )
 
-func (bot *Chatbot)ClearJawBruiser() (bool, error) {
-    kol := bot.KoL
-    body, err := kol.Uneffect(strconv.Itoa(bruisedJaw))
-    if err != nil {
-        return false, err
-    }
-
-    bod := string(body)
-    if strings.Contains(bod, "Effect removed.") {
-        return true, nil
-    }
-    if strings.Contains(bod, "Bruised Jaw (") {
-        fmt.Println("UNEFFECT FAILED: ", string(body))
-        return false, nil
-    }
-    // Turns out we never had it!
-    return true, nil
+type Effect struct {
+    ID     string
+    Name   string
+    Turns  int
+    Source string
 }
 
-func (bot *Chatbot)ClearSnowball() (bool, error) {
+func (bot *Chatbot)Uneffect(e *Effect) (bool, error) {
     kol := bot.KoL
-    body, err := kol.Uneffect(strconv.Itoa(snowBall))
+    body, err := kol.Uneffect(e.ID)
     if err != nil {
         return false, err
     }
 
-    bod := string(body)
-    if strings.Contains(bod, "Effect removed.") {
+    if bytes.Contains(body, []byte("Effect removed.")) {
         return true, nil
     }
-    if strings.Contains(bod, "B-b-brr! (") {
-        fmt.Println("UNEFFECT FAILED: ", string(body))
+
+    if bytes.Contains(body, []byte(e.Name + " (")) {
+        // Huh.  Still got it?  Maybe we ran out of SGEAs
         return false, nil
     }
     // Turns out we never had it!
-    return true, nil
+    return false, nil
 }
 
 type triggerTuple struct {
@@ -896,6 +886,73 @@ func NewChatbot(discordConf *DiscordConf, defaultDiscordChannel string, kolConf 
     return bot
 }
 
+const (
+    EffectName   int = iota
+    EffectTurns
+    EffectImg
+    EffectSource
+    EffectID
+)
+type APIStatus struct {
+    ID          string              `json:"playerid"`
+    Name        string              `json:"name"`
+    Effects     map[string][]string `json:"effects"`
+}
+func DecodeStatusResponse(body []byte) *APIStatus {
+    var st APIStatus
+    err := json.Unmarshal(body, &st)
+    if err != nil {
+        return nil
+    }
+    return &st
+}
+func RawEffectToEffect(r []string) *Effect {
+    turns, _ := strconv.Atoi(r[EffectTurns])
+    return &Effect{
+        ID:     r[EffectID],
+        Name:   r[EffectName],
+        Turns:  turns,
+        Source: r[EffectSource],
+    }
+}
+
+func (bot *Chatbot) ClearUnwantedEffects() {
+    body, err := bot.KoL.APIRequest("status", nil)
+    if err != nil {
+        return
+    }
+
+    effects := []*Effect{}
+    status  := DecodeStatusResponse(body)
+    if status == nil {
+        effects = append(effects, &Effect{
+            ID:   bruisedJaw,
+            Name: "Bruised Jaw",
+        })
+    } else {
+        for _, r := range status.Effects {
+            e := RawEffectToEffect(r)
+            effects = append(effects, e)
+        }
+    }
+    mustUneffect := map[string]bool{
+        "697": true,
+        "718": true,
+        "795": true,
+    }
+    for _, e := range effects {
+        if _, ok := mustUneffect[e.ID]; !ok {
+            continue
+        }
+
+        cleared, _ := bot.Uneffect(e)
+        if ! cleared && e.ID == bruisedJaw {
+            fmt.Printf("Started with effect %s, and could not clear it!\n", e.Name)
+            bot.PartialStfu = true
+        }
+    }
+}
+
 func main() {
     fromDiscordLogfile := "/var/log/kol-relay/relay.log"
     fromKoLLogfile     := "/var/log/kol-relay/from_kol.log"
@@ -935,14 +992,7 @@ func main() {
 
     // Clear the Bruised Jaw effect.  If we fail, do not relay bessages
     // from discord into kol
-    cleared, _ := bot.ClearJawBruiser()
-    if ! cleared {
-        fmt.Println("Started up jawbruised, and could not clear it!")
-        bot.PartialStfu = true
-    }
-    // Clear the snowball effect.  No harm if we can't -- just a lousy
-    // chat effect.
-    go bot.ClearSnowball()
+    go bot.ClearUnwantedEffects()
 
     // Try sending the initial message to confirm that everything is working
     // NOTE: We use SubmitChat, not the "nicer" interface SendMessage here,
