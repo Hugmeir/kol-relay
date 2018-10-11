@@ -265,6 +265,16 @@ func (bot *Chatbot)RelayToDiscord(destChannel string, toDiscord string) {
 func NewDiscordConnection(botAPIKey string) *discordgo.Session {
     dg, err := discordgo.New("Bot " + botAPIKey)
 
+    // Absurdly long timeout for connect:
+    orig := dg.Client.Timeout
+    dg.Client.Timeout = 1 * time.Minute
+    defer func(){ dg.Client.Timeout = orig }()
+    // Discord had a minor outage recently where new connections
+    // took much longer than usual to stablish.
+    // Discordgo has a default timeout of 20s, which is an
+    // eternity already, but bump it to 1m during the initial
+    // connection.
+
     err = dg.Open()
     if err != nil {
         panic(err)
