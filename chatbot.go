@@ -42,6 +42,9 @@ type Chatbot struct {
     GrumbledAt          sync.Map
     VerificationPending sync.Map
 
+    Inventory      KoLInventory
+    InventoryMutex sync.Mutex
+
     GlobalStfu  bool
     PartialStfu bool
 
@@ -820,26 +823,43 @@ func (bot *Chatbot)Cleanup() {
 }
 
 func NewChatbot(discordConf *DiscordConf, defaultDiscordChannel string, kolConf *KoLConf, fromKoL *os.File) *Chatbot {
+    var wg sync.WaitGroup
     // Connect to discord
-    dg := NewDiscordConnection(discordConf.DiscordApiKey)
+    wg.Add(3)
+    var dg *discordgo.Session
+    var kol kolgo.KoLRelay
+    var db *sql.DB
+    go func() {
+        defer wg.Done()
+        dg = NewDiscordConnection(discordConf.DiscordApiKey)
+    }()
 
     // Conenct to KoL
-    kol := kolgo.NewKoL(kolConf.Username +"/q", kolConf.Password, fromKoL)
-    err := kol.LogIn()
-    if err != nil {
-        panic(err)
-    }
+    go func() {
+        defer wg.Done()
+        kol = kolgo.NewKoL(kolConf.Username +"/q", kolConf.Password, fromKoL)
+        err := kol.LogIn()
+        if err != nil {
+            panic(err)
+        }
+    }()
 
-    dbConf := DbConf()
-    db, err := sql.Open(dbConf.DriverName, dbConf.DataSource)
-    if err != nil {
-        panic(err)
-    }
-    err = db.Ping()
-    if err != nil {
-        panic(err)
-    }
-    // Nice, sqlite works
+    go func() {
+        defer wg.Done()
+        dbConf := DbConf()
+        var err error
+        db, err = sql.Open(dbConf.DriverName, dbConf.DataSource)
+        if err != nil {
+            panic(err)
+        }
+        err = db.Ping()
+        if err != nil {
+            panic(err)
+        }
+        // Nice, sqlite works
+    }()
+
+    wg.Wait()
 
     bot := &Chatbot{
         KoL:         kol,
@@ -854,8 +874,24 @@ func NewChatbot(discordConf *DiscordConf, defaultDiscordChannel string, kolConf 
             make(map[string]bool, 20),
         },
     }
-    bot.FleshenSQLData()
-    bot.FleshenAdministrators(defaultDiscordChannel, discordConf)
+
+    wg.Add(3)
+
+    go func() {
+        defer wg.Done()
+        bot.RefreshInventory()
+    }()
+
+    go func() {
+        defer wg.Done()
+        bot.FleshenSQLData()
+    }()
+
+    go func() {
+        defer wg.Done()
+        bot.FleshenAdministrators(defaultDiscordChannel, discordConf)
+    }()
+    wg.Wait()
 
     return bot
 }

@@ -170,12 +170,18 @@ func HandleUseCommand(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageCr
         quantity = q
     }
 
+    amount, ok := bot.Inventory[item]
+    if !ok || amount <= 0 || amount < quantity {
+        s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("I don't think you have that item, but trying anyway -- I think you have ", amount))
+    }
+
     output, err  := bot.KoL.InvUse(item, quantity)
     if err != nil {
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Command run FAILED, error: ```css\n%s\n```", err))
         return
     }
 
+    bot.DecItem(item, quantity)
     formattedOutput := FormatGameOutput(output)
 
     s.ChannelMessageSend(m.ChannelID, "Command run, output: ```css\n" + formattedOutput + "\n```")
@@ -198,11 +204,18 @@ func HandleChewCommand(bot *Chatbot, s *discordgo.Session, m *discordgo.MessageC
         return
     }
 
+    amount, ok := bot.Inventory[item]
+    if !ok || amount <= 0 {
+        s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("I don't think you have that item, but trying anyway"))
+    }
+
     output, err  := bot.KoL.InvSpleen(item)
     if err != nil {
         s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Command run FAILED, error: ```css\n%s\n```", err))
         return
     }
+
+    bot.DecItem(item, 1)
 
     formattedOutput := FormatGameOutput(output)
 
