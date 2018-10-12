@@ -42,6 +42,7 @@ type Chatbot struct {
     NameOverride        sync.Map
     GrumbledAt          sync.Map
     VerificationPending sync.Map
+    SinceAPI            sync.Map
 
     Inventory      KoLInventory
     InventoryMutex sync.Mutex

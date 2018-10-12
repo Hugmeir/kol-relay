@@ -1,9 +1,12 @@
 package main
 import (
+    "time"
     "regexp"
     "fmt"
     "github.com/Hugmeir/kolgo"
 )
+
+var newMessageEventRe = regexp.MustCompile(`(?i)\ANew message received from <a[^>]+\bwho=(\d+)["'][^>]*>`)
 
 type kolEventHandler struct {
     re *regexp.Regexp
@@ -104,6 +107,43 @@ var kolEventHandlers = []kolEventHandler{
                 // Okay, so... There was an announcement, but it was too long.
                 // Drop it for now
             }()
+            return toDiscord, nil
+        },
+    },
+    kolEventHandler {
+        /* new kmail */
+        /*{"msgs":[{"type":"event","msg":"New message received from <a target=mainpane href='showplayer.php?who=2685812'><font color=green>Chick Norris<\/font><\/a>.","link":"messages.php","time":"1539345944"}],"last":"1469379751","delay":3000}*/
+        newMessageEventRe,
+        func (bot *Chatbot, message kolgo.ChatMessage, matches []string) (string, error) {
+            kol := bot.KoL
+            args := map[string]string{}
+            if since, ok := bot.SinceAPI.Load(`events`); ok {
+                args["since"] = since.(string)
+            } else {
+                args["since"] = time.Now().Add(time.Duration(-20) * time.Second).Format(time.RFC3339)
+            }
+            eventsRaw, err := kol.APIRequest(`events`, &args)
+            if err != nil {
+                fmt.Println("Failed to get recent events: ", err)
+                return "", err
+            }
+
+            bot.SinceAPI.Store(`events`, time.Now().Format(time.RFC3339))
+
+            events, _ := kolgo.DecodeAPIEvent(eventsRaw)
+            toDiscord := ""
+            for _, e := range events {
+                if !newMessageEventRe.MatchString(e.Message) {
+                    continue
+                }
+                payload  := e.Payload
+                playerID := payload[`from`]
+                kmailID  := payload[`id`]
+                out, err := bot.HandleKMail(playerID, kmailID)
+                if err == nil {
+                    toDiscord = toDiscord + out
+                }
+            }
             return toDiscord, nil
         },
     },
