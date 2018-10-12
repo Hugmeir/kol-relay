@@ -30,7 +30,7 @@ func FixMangledChatLinks(a string) (string, []string) {
         }
 
         // Grab the url first
-        urlRaw := make([]byte, loc[3] - loc[2])
+        urlRaw := make([]byte, 0, loc[3] - loc[2])
         copy(urlRaw, s[loc[2]:loc[3]])
         urls = append(urls, string(urlRaw))
 
@@ -135,7 +135,7 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effec
         sort.Slice(urls, func(i, j int) bool { return len(urls[i]) > len(urls[j]) })
         skip := [][]int{}
         b    := []byte(preparedMessage)
-        f    := make([]byte, len(b)*2)
+        f    := make([]byte, 0, len(b)*2)
 
         for _, url := range urls {
             offset := 0
