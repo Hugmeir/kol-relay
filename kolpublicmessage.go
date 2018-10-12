@@ -31,7 +31,7 @@ func FixMangledChatLinks(a string) (string, []string) {
 
         // Grab the url first
         urlRaw := make([]byte, 0, loc[3] - loc[2])
-        copy(urlRaw, s[loc[2]:loc[3]])
+        urlRaw  = append(urlRaw, s[loc[2]:loc[3]]...)
         urls = append(urls, string(urlRaw))
 
         // Now get rid of the whole <a> eyesore:
