@@ -48,7 +48,7 @@ func (bot *Chatbot)HandleKMail(playerID string, kmailID string) (string, error) 
 
     itemsToCheck := []*kolgo.Item{}
     toDiscord    := ""
-    for item, amount := range items {
+    for item, _ := range items {
         if _, ok := giftboxen[item.ID]; ok {
             body, err := kol.InvUse(item, 1)
             if err != nil {
