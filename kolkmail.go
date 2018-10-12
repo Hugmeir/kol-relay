@@ -84,7 +84,6 @@ func (bot *Chatbot)HandleKMail(playerID string, kmailID string) (string, error) 
 
     id := kmail.From.ID
     for _, i := range itemsToCheck {
-        fmt.Println("Was sent this item:", i.Name)
         successStr, ok := useOnSender[i.Name]
         if !ok {
             // Thanks for the donation, I guess?
@@ -97,7 +96,7 @@ func (bot *Chatbot)HandleKMail(playerID string, kmailID string) (string, error) 
             bot.KoL.SendMessage("/msg " + id, fmt.Sprintf("Could not use that %s on you because of an error", i.Name))
         }
         if !bytes.Contains(body, successStr) {
-            fmt.Printf("Failed to use %s on %s: %s\n", i.Name, kmail.From.Name, string(body))
+            fmt.Printf("Failed to use %s on %s: %s\n", i.Name, kmail.From.Name)
             bot.KoL.SendMessage("/msg " + id, fmt.Sprintf("Looks like you can't take another %s right now", i.Name))
         }
     }
