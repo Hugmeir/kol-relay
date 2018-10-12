@@ -8,12 +8,20 @@ import (
     "github.com/Hugmeir/kolgo"
 )
 
-var firstVerifyRe = regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?!?`)
-func (bot *Chatbot)HandleKoLDM(message kolgo.ChatMessage) (string, error) {
-    if !firstVerifyRe.MatchString(message.Msg) {
-        return "", nil
-    }
+type privateMsgHandler struct {
+    re *regexp.Regexp
+    cb func(*Chatbot, kolgo.ChatMessage, []string) (string, error)
+}
 
+var privateMsgHandlers = []privateMsgHandler{
+    privateMsgHandler{
+        /* user verification */
+        regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?!?`),
+        HandleKoLVerificationRequest,
+    },
+}
+
+func HandleKoLVerificationRequest(bot *Chatbot, message kolgo.ChatMessage, matches []string) (string, error) {
     senderId := bot.KoL.SenderIdFromMessage(message)
 
     _, ok := bot.VerificationPending.Load("User:" + message.Who.Name);
@@ -37,4 +45,14 @@ func (bot *Chatbot)HandleKoLDM(message kolgo.ChatMessage) (string, error) {
     return "", nil
 }
 
+func (bot *Chatbot)HandleKoLDM(message kolgo.ChatMessage) (string, error) {
+    for _, handler := range privateMsgHandlers {
+        m := handler.re.FindStringSubmatch(message.Msg)
+        if len(m) > 0 {
+            return handler.cb(bot, message, m)
+        }
+    }
+
+    return "", nil
+}
 
