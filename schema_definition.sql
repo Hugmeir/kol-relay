@@ -22,5 +22,12 @@ CREATE TABLE `kol_blacklist` (
     `row_created_at` DATETIME NOT NULL,
     `row_updated_at` DATETIME NOT NULL
 );
+CREATE TABLE `daily_chat_seen` (
+    `id` INTEGER PRIMARY KEY AUTOINCREMENT,
+    `seen_date` TEXT NOT NULL,
+    `account_name` TEXT NOT NULL,
+    `seen_count` INTEGER NOT NULL,
+    UNIQUE(`seen_date`, `account_name`)
+);
 DELETE FROM sqlite_sequence;
 COMMIT;

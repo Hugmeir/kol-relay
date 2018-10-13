@@ -52,6 +52,9 @@ type Chatbot struct {
     Inventory      KoLInventory
     InventoryMutex sync.Mutex
 
+    eligibleStashMutex  sync.Mutex
+    eligibleStashItems  []*kolgo.Item
+
     GlobalStfu  bool
     PartialStfu bool
 
