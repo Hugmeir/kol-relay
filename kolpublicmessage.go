@@ -9,6 +9,10 @@ import (
     "sort"
 
     "github.com/Hugmeir/kolgo"
+
+    "net/http"
+    "net/url"
+    "strconv"
 )
 
 var discordMeta = regexp.MustCompile("([\\_*~`])")
@@ -60,6 +64,65 @@ func FixMangledChatLinks(a string) (string, []string) {
     }
 
     return string(s), urls
+}
+
+var setEmpty = []string{
+    "2007",
+    "2008",
+    "2009",
+    "2010",
+    "2012",
+    "2025",
+    "4007",
+    "4008",
+    "4019",
+    "6003",
+    "6004",
+    "6005",
+    "6006",
+    "6007",
+    "6008",
+    "6009",
+    "6010",
+    "6011",
+    "6012",
+    "6013",
+    "6014",
+    "6015",
+    "6016",
+    "6017",
+    "6018",
+    "6027",
+    "6045",
+}
+
+const BuffyUrl = "https://kol.obeliks.de/buffbot/buff"
+func RequestOdeFor(who string, turns int) {
+    client := &http.Client{}
+    p := url.Values{}
+
+    for _, x := range setEmpty {
+        p.Set(x, "")
+    }
+
+    p.Set("target",    who)
+    p.Set("authToken", "")
+    p.Set("6014",      strconv.Itoa(turns))
+
+    buffs    := strings.NewReader(p.Encode())
+    req, err := http.NewRequest("POST", BuffyUrl, buffs)
+    if err != nil {
+        fmt.Println(err)
+        return
+    }
+
+    req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    resp, err := client.Do(req)
+    if err != nil {
+        fmt.Println(err)
+        return
+    }
+    defer resp.Body.Close()
 }
 
 var effectMatcher  = regexp.MustCompile(`(?i)<img src="[^"]+12x12(heart|skull)\.[^"]+"[^>]*>`)
@@ -178,6 +241,13 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effec
     } else {
         preparedMessage = EscapeDiscordMetaCharacters(preparedMessage)
     }
+
+    go func() {
+        ode := regexp.MustCompile(`(?i)\Aode(?:\s*[^ ]*)?\z`)
+        if ode.MatchString(preparedMessage) {
+            RequestOdeFor(message.Who.Name, 35)
+        }
+    }()
 
     preparedMessage = captureItalics.ReplaceAllString(preparedMessage, `*$1*`)
 
