@@ -279,9 +279,22 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effec
         }
     }()
 
-    preparedMessage = captureItalics.ReplaceAllString(preparedMessage, `*$1*`)
     preparedMessage = captureExtraLinks.ReplaceAllString(preparedMessage, `$1`)
 
+    preparedMessage = captureItalics.ReplaceAllString(preparedMessage, `*$1*`)
+    // foo: * foo* does not italize the second foo, because '* ' disables
+    // the metacharacter.  We could switch to using _ foo_, but then we
+    // need to guard against the final character being a _ within a /me message,
+    // which sounds like work.
+    // So just fix the weirdness by replacing all '* ' with ' *'
+    // Note: We need to do extra work to ensure we don't replace *escaped*
+    // metacharacters, and to ensure that start-of-string is handled too.
+    // How I miss you, positive lookbehind...
+    fixDiscordWeirdness := regexp.MustCompile(`[^\\]\* |^\* `)
+    preparedMessage = fixDiscordWeirdness.ReplaceAllString(preparedMessage, ` *`)
+
+    // the very *last* thing we do is unescape html meta characters;
+    // putting it earlier breaks all the other escapes.
     preparedMessage = html.UnescapeString(preparedMessage)
 
     finalMsg := fmt.Sprintf("%s%s", preparedSender, preparedMessage)
