@@ -1071,7 +1071,7 @@ func main() {
     toilbot.AddHandler(AcceptedApplication, func (app ClanApplication) {
         announcement := fmt.Sprintf(FCA_AnnounceKoLFmt, app.PlayerName, app.PlayerID)
         // Nice, we got a new clannie.  Make relay send them the welcome kmail:
-        bot.KoL.SendKMail(app.PlayerName, FCA_WELCOME)
+        bot.KoL.SendKMail(app.PlayerName, FCA_WELCOME, 0, nil)
         // And announce it in /clan & discord:
         bot.KoL.SendMessage("/clan", announcement)
         bot.Discord.ChannelMessageSend(defaultDiscordChannel, announcement)
