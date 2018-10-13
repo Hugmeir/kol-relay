@@ -96,8 +96,31 @@ var setEmpty = []string{
     "6045",
 }
 
+var baseBuffs = map[string]int{
+    "2007": 600,
+    "2008": 600,
+    "2009": 600,
+    "2010": 600,
+    "2012": 600,
+    "2025": 600,
+    "4007": 600,
+    "4008": 600,
+    "4019": 600,
+}
+
 const BuffyUrl = "https://kol.obeliks.de/buffbot/buff"
-func RequestOdeFor(who string, turns int) {
+func RequestBuffsFor(who string) {
+    BuffyRequest(who, baseBuffs)
+}
+
+func RequestOdeFor(who string) {
+    buffs := map[string]int{
+        "6014": 50,
+    }
+    BuffyRequest(who, buffs)
+}
+
+func BuffyRequest(who string, wantedBuffs map[string]int) {
     client := &http.Client{}
     p := url.Values{}
 
@@ -107,7 +130,10 @@ func RequestOdeFor(who string, turns int) {
 
     p.Set("target",    who)
     p.Set("authToken", "")
-    p.Set("6014",      strconv.Itoa(turns))
+    for buffID, turns := range wantedBuffs {
+        p.Set(buffID, strconv.Itoa(turns))
+    }
+
 
     buffs    := strings.NewReader(p.Encode())
     req, err := http.NewRequest("POST", BuffyUrl, buffs)
@@ -243,9 +269,12 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effec
     }
 
     go func() {
-        ode := regexp.MustCompile(`(?i)\Aode(?:\s*[^ ]*)?\z`)
+        ode   := regexp.MustCompile(`(?i)\Aode(?:\s*[^ ]*)?\z`)
+        buffs := regexp.MustCompile(`(?i)\Abuffs(?:\s*[^ ]*)?\z`)
         if ode.MatchString(preparedMessage) {
-            RequestOdeFor(message.Who.Name, 35)
+            RequestOdeFor(message.Who.Name)
+        } else if buffs.MatchString(preparedMessage) {
+            RequestBuffsFor(message.Who.Name)
         }
     }()
 
