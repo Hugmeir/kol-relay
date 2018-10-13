@@ -154,6 +154,7 @@ func BuffyRequest(who string, wantedBuffs map[string]int) {
 var effectMatcher  = regexp.MustCompile(`(?i)<img src="[^"]+12x12(heart|skull)\.[^"]+"[^>]*>`)
 var slashMeMatcher = regexp.MustCompile(`(?i)\A<b><i><a target=mainpane href=[^>]+><font color[^>]+>([^<]+)<\\?/b><\\?/font><\\?/a>(.+)<\\?/i>\z`)
 var captureItalics = regexp.MustCompile(`(?i)<i>((?:[^<]+|<\s*/?\s*[^i])+)</i>`)
+var captureExtraLinks = regexp.MustCompile(`(?i)<a[^>]*>([^<]+)</a>`)
 var effectToCmdDefaults  map[string]string = map[string]string{
     // Defaults:
     "heart": `🖤`,
@@ -279,6 +280,7 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effec
     }()
 
     preparedMessage = captureItalics.ReplaceAllString(preparedMessage, `*$1*`)
+    preparedMessage = captureExtraLinks.ReplaceAllString(preparedMessage, `$1`)
 
     preparedMessage = html.UnescapeString(preparedMessage)
 
