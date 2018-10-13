@@ -28,6 +28,11 @@ import (
     "github.com/Hugmeir/kolgo"
 )
 
+var prodMode = true
+func RunningInDevMode() bool {
+    return !prodMode
+}
+
 type ExtraDiscordData struct {
     RankIDToName   map[string]string
     Administrators map[string]bool
@@ -69,6 +74,7 @@ func init() {
     flag.StringVar(&kolConfJson,     "kol_conf",     "", "Path to the KoL config JSON file")
     flag.StringVar(&relayConfJson,   "relay_conf",   "", "Path to the relay targets JSON file")
     flag.StringVar(&toilConfJson,    "toil_conf",    "", "Path to the KoL config JSON for the clan management bot")
+    flag.BoolVar(  &prodMode,        "wet_run",   false, "Running in production environment")
 
     flag.StringVar(&googleConfDir,    "google_conf_dir",    "", "Path to a dir holding credentials.json, token.json, and sheets.json")
 
