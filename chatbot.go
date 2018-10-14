@@ -735,7 +735,14 @@ func (bot *Chatbot)HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.M
 
     go bot.DiscordMessageTriggers(s, m)
 
-    author    := sanitizeForKoL(bot.ResolveNickname(s, m))
+    authorRaw := bot.ResolveNickname(s, m)
+    if authorRaw != m.Author.ID {
+        // EXPERIMENTAL: Send messages in-game if they speak up in discord
+        // But only for verified clannies!  Since presumably their names match...
+        go bot.MaybeSendCarePackage(authorRaw)
+    }
+
+    author    := sanitizeForKoL(authorRaw)
     msgForKoL := sanitizeForKoL(msg)
     finalMsg  := author + ": " + msgForKoL
 
