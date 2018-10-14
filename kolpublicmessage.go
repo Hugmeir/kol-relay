@@ -276,7 +276,7 @@ func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCm
             RequestOdeFor(message.Who.Name)
         } else if buffs.MatchString(preparedMessage) {
             RequestBuffsFor(message.Who.Name)
-        } else if len(preparedMessage) > 1 {
+        } else if len(preparedMessage) > 1 && message.Channel == "clan" {
             // buff requests don't count.
             bot.MaybeSendCarePackage(message.Who.Name)
         }
