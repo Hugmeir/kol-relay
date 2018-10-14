@@ -178,10 +178,7 @@ func (toilbot *ToilBot) CheckNewApplications(bot *Chatbot) {
             fmt.Printf("REJECTING application from blacklisted user %s\n", app.PlayerName)
             _, err := kol.ClanProcessApplication(app.RequestID, false)
             if err != nil {
-                if fatalError := kol.HandleKoLException(err); fatalError != nil {
-                    fmt.Println("Unable to reject application: ", err)
-                    continue
-                }
+                fmt.Println("Unable to reject application: ", err)
             }
             continue
         }
@@ -191,18 +188,10 @@ func (toilbot *ToilBot) CheckNewApplications(bot *Chatbot) {
 
         body, err := kol.ClanProcessApplication(app.RequestID, true)
         if err != nil {
-            if err := kol.HandleKoLException(err); err != nil {
-                fmt.Println("Failed to accept an application: ", err)
-                continue
-            }
-            // Okay, so that previous attempt failed, try one more time:
-            body, err = kol.ClanProcessApplication(app.RequestID, true)
-            if err != nil {
-                // Failed again.  Sorry new person, you'll get skipped for now.
-                fmt.Println("Failed to accept an application: ", err)
-                continue
-            }
+            fmt.Println("Failed to accept an application: ", err)
+            continue
         }
+
         if bytes.Contains(body, []byte(`You cannot accept new members into the clan.`)) {
             toilbot.Stop = true
             return
@@ -263,19 +252,13 @@ func (toilbot *ToilBot) UpgradeSilentPleasures(clannies []ClanMember) {
     kol := toilbot.KoL
     body, err := kol.ClanModifyMembers(mods)
     if err != nil {
-        if fatalError := kol.HandleKoLException(err); fatalError != nil {
-            return
-        }
-        body, err = kol.ClanModifyMembers(mods)
-        if err != nil {
-            return
-        }
-    }
-
-    // TODO: check if body contains the thing we need
-    if body != nil {
         return
     }
+    // TODO: check if body contains the thing we need
+    if body == nil {
+        return
+    }
+    return
 }
 
 func (toilbot *ToilBot) EnsureAllSeekersAreWhitelisted(bot *Chatbot, clannies []ClanMember) {
@@ -417,19 +400,13 @@ func (toilbot *ToilBot) CheckActivesAndInactives(clannies []ClanMember) {
     kol := toilbot.KoL
     body, err := kol.ClanModifyMembers(mods)
     if err != nil {
-        if fatalError := kol.HandleKoLException(err); fatalError != nil {
-            return
-        }
-        body, err = kol.ClanModifyMembers(mods)
-        if err != nil {
-            return
-        }
-    }
-
-    // TODO: check if body contains the thing we need
-    if body != nil {
         return
     }
+    // TODO: check if body contains the thing we need
+    if body == nil {
+        return
+    }
+    return
 }
 
 func (toilbot *ToilBot)MaintainBlacklist(bot *Chatbot) {
