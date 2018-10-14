@@ -1022,7 +1022,7 @@ func main() {
             return
         }
 
-        toDiscord, err := HandleKoLPublicMessage(kol, message, discordConf.EffectTransform)
+        toDiscord, err := bot.HandleKoLPublicMessage(message, discordConf.EffectTransform)
         if err != nil {
             // TODO
             return

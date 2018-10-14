@@ -161,8 +161,8 @@ var effectToCmdDefaults  map[string]string = map[string]string{
     "skull": `☠`,
     "?": "",
 }
-func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effectToCmd map[string]string) (string, error) {
-    preparedMessage := message.Msg;
+func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCmd map[string]string) (string, error) {
+    preparedMessage := message.Msg
     preparedSender  := fmt.Sprintf("**%s**: ", EscapeDiscordMetaCharacters(message.Who.Name))
 
     wrapAround := make(map[string]bool, 3)
@@ -276,6 +276,9 @@ func HandleKoLPublicMessage(kol kolgo.KoLRelay, message kolgo.ChatMessage, effec
             RequestOdeFor(message.Who.Name)
         } else if buffs.MatchString(preparedMessage) {
             RequestBuffsFor(message.Who.Name)
+        } else if len(preparedMessage) > 1 {
+            // buff requests don't count.
+            bot.MaybeSendCarePackage(message.Who.Name)
         }
     }()
 
