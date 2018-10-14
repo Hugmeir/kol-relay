@@ -137,6 +137,9 @@ func (bot *Chatbot)TakeRandomItemFromList(items []*kolgo.Item) *kolgo.Item {
     }
 
     if !CouldGetItem(body) {
+        if bytes.Contains(body, []byte(`You can't take that many more zero-karma items from the stash today.`)) {
+            bot.ClearZeroKarmaItems()
+        }
         return nil
     }
 
@@ -168,6 +171,23 @@ var crappyItems = map[string]bool{
     "worthless knick-knack": true,
 }
 
+func (bot *Chatbot) ClearZeroKarmaItems() {
+    bot.eligibleStashMutex.Lock()
+    defer bot.eligibleStashMutex.Unlock()
+    if len(bot.eligibleStashItems) == 0 {
+        return
+    }
+
+    filtered := make([]*kolgo.Item, 0, len(bot.eligibleStashItems))
+    for _, i := range bot.eligibleStashItems {
+        if i.Autosell <= 0 {
+            continue
+        }
+        filtered = append(filtered, i)
+    }
+    bot.eligibleStashItems = filtered
+}
+
 func (bot *Chatbot) EligibleStashItems() []*kolgo.Item {
     bot.eligibleStashMutex.Lock()
     defer bot.eligibleStashMutex.Unlock()
@@ -195,11 +215,45 @@ func (bot *Chatbot) EligibleStashItems() []*kolgo.Item {
     return bot.eligibleStashItems
 }
 
-const FCA_CARE_PACKAGE = `That's the kind of attitude we like around here!
+var carePackageNotes = [][2]string{
+    [2]string{
+        "That's the kind of attitude we like around here!\n\nOr don't like.  This bot doesn't judge.\n\nEither way, you were active on the FCA clan chat today, so you deserve a little reward:",
+        "Maybe it was a little punishment?",
+    },
+    [2]string{
+        "Since you shared in the FCA clan chat so candidly today (Probably.  This is a bot.  It doesn't know) we wanted to give you a little present.\n\nExperience the joy and wonder of this glorious mystery item:",
+        "",
+    },
+    [2]string{
+        "Congratulations! You interacted with -- allegedly -- human beings today, in the FCA clan chat.\n\nWe suspect it was a traumatic experience, so hopefully this item will make it better:",
+        "",
+    },
+    [2]string{
+        "Merely having a pulse is not enough to get a present, but talking in the FCA clan is!\n\nThis is a bot, it doesn't have standards.\n",
+        "",
+    },
+    [2]string{
+        // From Crui
+        "Here is an item\nWith a star saying you tried\nNext time, do haiku.\n",
+        "",
+    },
+    [2]string{
+        "A little thank-you from us for talking in chat today:",
+        "Genuinely hope it was worth the wait!",
+    },
+    [2]string{
+        "You talking in clan chat today reminded me of this:",
+        "",
+    },
+}
 
-Or don't like.  This bot doesn't judge.
+// TODO: would be nice to do a dumb jumphash here so that
+// a recipient won't get the same message twice.  But meh
+func PickMessageText(who string) (string, string) {
+    t := carePackageNotes[rand.Intn(len(carePackageNotes))]
+    return t[0], t[1]
+}
 
-Either way, you were active on the FCA clan chat today, so you deserve a little reward:`
 func (bot *Chatbot) SendCarePackage(who string) {
     eligibleItems := bot.EligibleStashItems()
     if len(eligibleItems) <= 0 {
@@ -221,17 +275,19 @@ func (bot *Chatbot) SendCarePackage(who string) {
 
     fmt.Printf("Sending daily care package to %s: %s\n", who, item.Name)
 
+    note, innernote := PickMessageText(who)
+
     items := &map[*kolgo.Item]int{
         item: 1,
     }
-    body, err := bot.KoL.SendKMail(who, FCA_CARE_PACKAGE, 0, items)
+    body, err := bot.KoL.SendKMail(who, note, 0, items)
     if err != nil {
         fmt.Println("Could not send package because of this error:", err)
         return
     }
     if bytes.Contains(body, []byte(`That player cannot receive`)) {
         // A package it is!
-        bot.KoL.SendGift(who, FCA_CARE_PACKAGE, "Maybe it was a little punishment?", 0, items)
+        bot.KoL.SendGift(who, note, innernote, 0, items)
     }
 }
 
