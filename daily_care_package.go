@@ -263,8 +263,11 @@ func (bot *Chatbot) SendCarePackage(who string) {
 
     item := bot.TakeRandomItemFromList(eligibleItems)
     if item == nil {
-        // Do a second try
-        item = bot.TakeRandomItemFromList(eligibleItems)
+        // Do a second try; refresh the list:
+        eligibleItems = bot.EligibleStashItems()
+        if len(eligibleItems) > 0 {
+            item = bot.TakeRandomItemFromList(eligibleItems)
+        }
     }
 
     if item == nil {
