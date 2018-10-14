@@ -19,7 +19,7 @@ func TodayDateString(who string) string {
 }
 
 func (bot *Chatbot) SeenTodayCount(today, who string) (int, error) {
-    rows, err := bot.Db.Query("SELECT count FROM `daily_chat_seen` WHERE seen_date = ? and account_name = ?", today, who)
+    rows, err := bot.Db.Query("SELECT seen_count FROM `daily_chat_seen` WHERE seen_date = ? and account_name = ?", today, who)
     if err != nil {
         fmt.Println("Failed to select the seen count:", err)
         return -1, err
@@ -105,7 +105,11 @@ func (bot *Chatbot) MaybeSendCarePackage(who string) {
     bot.SendCarePackage(who)
 }
 
-func CouldNotGetItem(b []byte) bool {
+func CouldGetItem(b []byte) bool {
+    if bytes.Contains(b, []byte(`You acquire an item:`)) {
+        return true
+    }
+
     if bytes.Contains(b, []byte(`You cannot take zero karma items from the stash`)) {
         return false
     }
@@ -130,7 +134,7 @@ func (bot *Chatbot)TakeRandomItemFromList(items []*kolgo.Item) *kolgo.Item {
         return nil
     }
 
-    if CouldNotGetItem(body) {
+    if !CouldGetItem(body) {
         return nil
     }
 
@@ -212,6 +216,8 @@ func (bot *Chatbot) SendCarePackage(who string) {
         fmt.Println("Could not take an item from the stash to gift to", who)
         return
     }
+
+    fmt.Printf("Sending daily care package to %s: %s\n", who, item.Name)
 
     items := &map[*kolgo.Item]int{
         item: 1,

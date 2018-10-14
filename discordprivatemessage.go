@@ -133,10 +133,9 @@ func ValidItemID(itemID string) bool {
     return validItemID.MatchString(itemID)
 }
 func resolveItem(s string) (*kolgo.Item, error) {
-    var item *kolgo.Item
     if ValidItemID(s) {
         if id, err := strconv.Atoi(s); err != nil {
-            item, _ = kolgo.ToItem(id)
+            item, _ := kolgo.ToItem(id)
             if item != nil {
                 return item, nil
             }
