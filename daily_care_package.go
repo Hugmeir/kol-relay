@@ -96,13 +96,15 @@ func (bot *Chatbot) MaybeSendCarePackage(who string) {
     }
 
     seen := bot.IncreaseSeenTodayCount(today, who)
-    if seen != MINIMUM_CHATTERY_FOR_GIFTERY {
-        return
+    if seen == MINIMUM_CHATTERY_FOR_GIFTERY {
+        // Nice!  Let's send them a gift.
+        alreadySentToday.Store(today + "|" + who, true)
+        bot.SendCarePackage(who)
+    } else if seen > MINIMUM_CHATTERY_FOR_GIFTERY {
+        // Another process got to it, so just mark it in-memory to
+        // prevent db locks
+        alreadySentToday.Store(today + "|" + who, true)
     }
-
-    // Nice!  Let's send them a gift.
-    alreadySentToday.Store(today + "|" + who, true)
-    bot.SendCarePackage(who)
 }
 
 func CouldGetItem(b []byte) bool {
