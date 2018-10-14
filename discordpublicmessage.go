@@ -67,7 +67,7 @@ func sanitizeForKoL (content string) string {
     return encoded
 }
 
-func (bot *Chatbot)ResolveNickname(s *discordgo.Session, m *discordgo.MessageCreate) string {
+func (bot *Chatbot)NicknameOverride(s *discordgo.Session, m *discordgo.MessageCreate) string {
     id := m.Author.ID
 
     result, ok := bot.NameOverride.Load(id)
@@ -77,7 +77,7 @@ func (bot *Chatbot)ResolveNickname(s *discordgo.Session, m *discordgo.MessageCre
 
     go bot.GrumbleIfNicknameAndUsernameDiffer(s, m)
 
-    return m.Author.Username
+    return ""
 }
 
 func (bot *Chatbot)InsertNicknameGrumble(discordId string) {
@@ -338,14 +338,16 @@ func (bot *Chatbot)HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.M
 
     go bot.DiscordMessageTriggers(s, m)
 
-    authorRaw := bot.ResolveNickname(s, m)
-    if authorRaw != m.Author.ID {
+    author         := m.Author.Username
+    authorOverride := bot.NicknameOverride(s, m)
+    if authorOverride != "" {
+        author = authorOverride
         // EXPERIMENTAL: Send messages in-game if they speak up in discord
         // But only for verified clannies!  Since presumably their names match...
-        go bot.MaybeSendCarePackage(authorRaw)
+        go bot.MaybeSendCarePackage(author)
     }
 
-    author    := sanitizeForKoL(authorRaw)
+    author     = sanitizeForKoL(author)
     msgForKoL := sanitizeForKoL(msg)
     finalMsg  := author + ": " + msgForKoL
 
