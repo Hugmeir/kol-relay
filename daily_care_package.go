@@ -255,6 +255,46 @@ var carePackageNotes = [][2]string{
         "You talking in clan chat today reminded me of this:",
         "",
     },
+    [2]string{
+        "This bot only exists because of chatterboxes like you.\n\nIndeed, you've aided in the continued existence of this terrible curse.\n\nPonder your actions with this:",
+        "",
+    },
+    [2]string{
+        "Hey now, you're an all-star.  Got your chat game on, get paid:",
+        "Did this glitter? Was it gold?",
+    },
+    [2]string{
+        "You talked in chat, and odds are you didn't kill Oscus today, so you are as close to a model clannie as it gets.",
+        "",
+    },
+    [2]string{
+        "Talking in chat gets you rewarded, but you know what's way more rewarding?  Sending packages to caducus while she's in-run.  Try it out!",
+        "",
+    },
+    [2]string{
+        "You've chatted hard enough to knock off a present off the clan ceiling.\n\nYou should chat harder, see if something else will get knocked off today.\n\n(Spoiler: it won't, but you never know)",
+        "",
+    },
+    [2]string{
+        "Meat that talks, just how unsettling is that?  Have a small reward for reducing the meat flapping and typing in clan chat today:",
+        "http://www.mit.edu/people/dpolicar/writing/prose/text/thinkingMeat.html",
+    },
+    [2]string{
+        "OYSTER FACT: Cultured pearls look just like natural ones but are considered less valuable.\nStop pearl discrimination!\n\nOh and you were active in chat today, so have a little pearl from the clan stash:",
+        "",
+    },
+    [2]string{
+        "Writing wholesome messages is hard, but you put the effort and sent messages in clan chat today, so... <3",
+        "I-it's not like I like you or anything!",
+    },
+    [2]string{
+        "Today, you succeeded in talking in /clan.  Huzzah!\n\nHere's your reward:",
+        "",
+    },
+    [2]string{
+        "As a branded talker, you must carry this item forever in penance.  Or until you get rid of it, whichever comes first:",
+        "",
+    },
 }
 
 // TODO: would be nice to do a dumb jumphash here so that
