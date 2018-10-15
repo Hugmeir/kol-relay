@@ -308,7 +308,12 @@ func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCm
             bot.KoL.SendMessage("/clan", `Will immediately respond with fries/robin/thin.  You can also PM me with "hold" to hold your consult.  jenn rulz ok`)
         } else if len(preparedMessage) > 1 && message.Channel == "clan" {
             // buff requests don't count.
-            bot.MaybeSendCarePackage(message.Who.Name)
+            id       := resolvePlayerID(message.Who.Id)
+            idNum, _ := strconv.Atoi(id)
+            if idNum > 0 {
+                // No Frosty thank you
+                bot.MaybeSendCarePackage(message.Who.Name)
+            }
         }
     }()
 
