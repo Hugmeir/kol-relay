@@ -42,6 +42,7 @@ type Chatbot struct {
     GrumbledAt          sync.Map
     VerificationPending sync.Map
     SinceAPI            sync.Map
+    HoldConsultsFor     sync.Map
 
     Inventory      KoLInventory
     InventoryMutex sync.Mutex
@@ -618,6 +619,49 @@ func (bot *Chatbot) ClearUnwantedEffects() {
     }
 }
 
+const (
+    FORTUNE_REAL_CONSULT    = "real"
+    FORTUNE_VIRTUAL_CONSULT = "virtual"
+)
+
+func (bot *Chatbot)RespondToOutstandingConsults() {
+    // This is how we deal with "long term" holds:  Anything that is held when
+    // we start-up is counted as long-term
+    time.Sleep(1 * time.Minute)
+    kol := bot.KoL
+    b, err := kol.ClanVIPFortune()
+    if err != nil {
+        fmt.Println("Could not get outstanding consults: ", err)
+        return
+    }
+
+    outstanding := kolgo.DecodeOutstandingZataraConsults(b)
+    for _, p := range outstanding {
+        bot.HoldConsultsFor.Store(p.ID, FORTUNE_REAL_CONSULT)
+    }
+
+    ticker := time.NewTicker(30 * time.Minute)
+    for {select {
+    case <-ticker.C:
+        kol := bot.KoL
+        b, err := kol.ClanVIPFortune()
+        if err != nil {
+            fmt.Println("Could not get consults: ", err)
+            continue
+        }
+
+        outstanding := kolgo.DecodeOutstandingZataraConsults(b)
+        for _, p := range outstanding {
+            if _, ok := bot.HoldConsultsFor.Load(p.ID); ok {
+                // Holding this consult
+                continue
+            }
+            time.Sleep(5 * time.Second)
+            _, _ = kol.ClanResponseLoveTest(p.ID, FCA_RESPONSE1, FCA_RESPONSE2, FCA_RESPONSE3)
+        }
+    }}
+}
+
 func main() {
     fromDiscordLogfile := "/var/log/kol-relay/relay.log"
     fromKoLLogfile     := "/var/log/kol-relay/from_kol.log"
@@ -747,6 +791,8 @@ func main() {
     })
 */
     go toilbot.PollClanManagement(bot)
+
+    go bot.RespondToOutstandingConsults()
 
     fmt.Println("Bot is now running.  Press CTRL-C to exit.")
     sc := make(chan os.Signal, 1)

@@ -268,20 +268,6 @@ func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCm
     } else {
         preparedMessage = EscapeDiscordMetaCharacters(preparedMessage)
     }
-
-    go func() {
-        ode   := regexp.MustCompile(`(?i)\Aode(?:\s*[^ ]*)?\z`)
-        buffs := regexp.MustCompile(`(?i)\Abuffs(?:\s*[^ ]*)?\z`)
-        if ode.MatchString(preparedMessage) {
-            RequestOdeFor(message.Who.Name)
-        } else if buffs.MatchString(preparedMessage) {
-            RequestBuffsFor(message.Who.Name)
-        } else if len(preparedMessage) > 1 && message.Channel == "clan" {
-            // buff requests don't count.
-            bot.MaybeSendCarePackage(message.Who.Name)
-        }
-    }()
-
     preparedMessage = captureExtraLinks.ReplaceAllString(preparedMessage, `$1`)
 
     preparedMessage = captureItalics.ReplaceAllString(preparedMessage, `*$1*`)
@@ -309,6 +295,22 @@ func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCm
     if message.Channel != "clan" {
         finalMsg = fmt.Sprintf("[%s] %s", message.Channel, finalMsg)
     }
+
+    go func() {
+        ode   := regexp.MustCompile(`(?i)\Aode(?:\s*[^ ]*)?\z`)
+        buffs := regexp.MustCompile(`(?i)\Abuffs(?:\s*[^ ]*)?\z`)
+        bots  := regexp.MustCompile(`(?i)\Abots\??\z`)
+        if ode.MatchString(preparedMessage) {
+            RequestOdeFor(message.Who.Name)
+        } else if buffs.MatchString(preparedMessage) {
+            RequestBuffsFor(message.Who.Name)
+        } else if message.Channel == "clan" && bots.MatchString(preparedMessage) {
+            bot.KoL.SendMessage("/clan", `Will immediately respond with fries/robin/thin.  You can also PM me with "hold" to hold your consult.  jenn rulz ok`)
+        } else if len(preparedMessage) > 1 && message.Channel == "clan" {
+            // buff requests don't count.
+            bot.MaybeSendCarePackage(message.Who.Name)
+        }
+    }()
 
     return finalMsg, nil
 }

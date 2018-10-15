@@ -1,9 +1,17 @@
 package main
 import (
     "time"
+    "bytes"
     "regexp"
     "fmt"
     "github.com/Hugmeir/kolgo"
+)
+
+// TODO: get from config
+const (
+    FCA_RESPONSE1 = `fries`
+    FCA_RESPONSE2 = `robin`
+    FCA_RESPONSE3 = `thin`
 )
 
 var newMessageEventRe = regexp.MustCompile(`(?i)\ANew message received from <a[^>]+\bwho=(\d+)["'][^>]*>`)
@@ -147,6 +155,31 @@ var kolEventHandlers = []kolEventHandler{
             return toDiscord, nil
         },
     },
+    kolEventHandler {
+        /* consult */
+        /*You have been invited to <a style='color: green' target='mainpane' href='clan_viplounge.php?preaction=testlove&testlove=3061055'>consult Madame Zatara about your relationship<\/a> with Hugmeir.","link":false,"time":"1539627284"}],"last":"1469529316","delay":3000}*/
+        regexp.MustCompile(`(?i)You have been invited to <a[^>]+href=["']clan_viplounge\.php\?preaction=testlove&testlove=([0-9]+)['"]>consult Madame Zatara`),
+        func (bot *Chatbot, message kolgo.ChatMessage, matches []string) (string, error) {
+            sucker := matches[1]
+            kol    := bot.KoL
+            if _, ok := bot.HoldConsultsFor.Load(sucker); ok {
+                bot.HoldConsultsFor.Store(sucker, FORTUNE_REAL_CONSULT)
+                kol.SendMessage("/msg " + sucker, "Will hold that consult until you send a PM saying 'release'")
+                return "", nil
+            }
+
+            body, err := bot.RespondToConsult(sucker)
+
+            if err != nil {
+                fmt.Println("Failed to respond to consult: ", err)
+                kol.SendMessage("/msg " + sucker, "Sorry, had some error when respoding to your consult.  Will try again in ~30m")
+            } else if !ConsultResponseWasSuccessful(body) {
+                kol.SendMessage("/msg " + sucker, "Sorry, had some error when respoding to your consult.  Will try again in ~30m")
+            }
+
+            return "", nil
+        },
+    },
 }
 func (bot *Chatbot)HandleKoLEvent(message kolgo.ChatMessage) (string, error) {
     for _, handler := range kolEventHandlers {
@@ -159,4 +192,24 @@ func (bot *Chatbot)HandleKoLEvent(message kolgo.ChatMessage) (string, error) {
     return "", nil
 }
 
+
+func (bot *Chatbot) RespondToConsult(playerID string) ([]byte, error) {
+    kol     := bot.KoL
+
+    bot.HoldConsultsFor.Delete(playerID)
+
+    return kol.ClanResponseLoveTest(
+        playerID,
+        FCA_RESPONSE1,
+        FCA_RESPONSE2,
+        FCA_RESPONSE3,
+    )
+}
+
+func ConsultResponseWasSuccessful(b []byte) bool {
+    if bytes.Contains(b, []byte(`Thanks!  We'll calculate your results and send them to`)) {
+        return true
+    }
+    return false
+}
 
