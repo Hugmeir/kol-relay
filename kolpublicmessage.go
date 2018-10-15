@@ -279,8 +279,8 @@ func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCm
     // Note: We need to do extra work to ensure we don't replace *escaped*
     // metacharacters, and to ensure that start-of-string is handled too.
     // How I miss you, positive lookbehind...
-    fixDiscordWeirdness := regexp.MustCompile(`[^\\]\* |^\* `)
-    preparedMessage = fixDiscordWeirdness.ReplaceAllString(preparedMessage, ` *`)
+    fixDiscordWeirdness := regexp.MustCompile(`([^\\])\* |^\* `)
+    preparedMessage = fixDiscordWeirdness.ReplaceAllString(preparedMessage, `$1 *`)
 
     // the very *last* thing we do is unescape html meta characters;
     // putting it earlier breaks all the other escapes.
