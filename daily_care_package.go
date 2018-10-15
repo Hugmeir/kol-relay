@@ -67,6 +67,21 @@ func (bot *Chatbot) IncreaseSeenTodayCount(today, who string) int {
     return seen
 }
 
+// This is a blacklist of people that should never, ever get
+// packages.  This is different from the opt-out feature -- there
+// is no opting in for these.  They never get anything.
+//
+// This is basically reserved for people with admin access to
+// the bot, to prevent even a whiff of multi abuse.
+var carePackageBlacklist = map[string]string{
+    // Admins:
+    "hugmeir": "Wrote this sucker, getting packages smells strongly of multi abuse, so none for me, thanks.",
+    "caducus": "Has the Relay's password in case I eat the bucket.  Yep, eat the bucket.  I don't intend to go any other way.",
+
+    // Bots:
+    "hekiryuu": "Is a bot, bots don't get presents. /baleet Odebot goes deep",
+}
+
 // Global while we try out the care packages
 var alreadySentToday sync.Map
 const MINIMUM_CHATTERY_FOR_GIFTERY = 2
@@ -79,13 +94,8 @@ func (bot *Chatbot) MaybeSendCarePackage(who string) {
     // Just makes things simpler:
     who = strings.ToLower(who)
 
-    if strings.EqualFold(who, `hugmeir`) {
-        // Nope.  I'm opting myself out.  It smells of multi abuse to me.
-        return
-    }
-
-    if strings.EqualFold(who, `hekiryuu`) {
-        // Opting opt hekibot.  /baleet odebot goes deep.
+    if _, ok := carePackageBlacklist[who]; ok {
+        // You don't get a package, sucker.
         return
     }
 
