@@ -297,10 +297,30 @@ var carePackageNotes = [][2]string{
     },
 }
 
-// TODO: would be nice to do a dumb jumphash here so that
-// a recipient won't get the same message twice.  But meh
 func PickMessageText(who string) (string, string) {
-    t := carePackageNotes[rand.Intn(len(carePackageNotes))]
+    // The player's name is the RNG seed:
+    var i int64 = 0
+    for _, r := range who {
+        i += int64(r)
+    }
+
+    seed := rand.NewSource(i)
+    r    := rand.New(seed)
+
+    // Shuffle the greetings using our shiny new RNG
+    shuffled := make([][2]string, len(carePackageNotes))
+    copy(shuffled, carePackageNotes)
+    r.Shuffle(len(carePackageNotes), func (i, j int) {
+        shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+    })
+
+    if len(shuffled) > 31 {
+        fmt.Println("Our dumb shuffler will never get to the final entries, there's just too many!")
+    }
+
+    // Pick our winner:
+    _, _, today := time.Now().Date()
+    t := shuffled[ today % len(shuffled) ]
     return t[0], t[1]
 }
 
