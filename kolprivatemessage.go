@@ -38,7 +38,14 @@ var privateMsgHandlers = []privateMsgHandler{
         regexp.MustCompile(`(?i)^\s*hold\b`),
         func (bot *Chatbot, message kolgo.ChatMessage, matches []string) (string, error) {
             id := resolvePlayerID(message.Who.Id)
-            bot.HoldConsultsFor.Store(id, FORTUNE_VIRTUAL_CONSULT)
+            if _, ok := bot.HoldConsultsFor.Load(id); !ok {
+                // Don't override a "real" hold with a virtual one
+                // We get here if this happens:
+                // "hold"
+                // send consult
+                // "hold"
+                bot.HoldConsultsFor.Store(id, FORTUNE_VIRTUAL_CONSULT)
+            }
             bot.KoL.SendMessage("/msg " + id, "Will hold any future consult until you say 'release'")
             return "", nil
         },
