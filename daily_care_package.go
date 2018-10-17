@@ -97,6 +97,8 @@ func (bot *Chatbot) OptOutOfOptingOutOfDailyPackages(who string) {
         return
     }
 
+    carePackageBlacklist.Delete(who)
+
     sqliteInsert.Lock()
     defer sqliteInsert.Unlock()
     stmt, err := bot.Db.Prepare("DELETE FROM `daily_package_opt_out` WHERE `account_name`=?")

@@ -4,6 +4,7 @@ import (
     "os"
     "os/signal"
     "sync"
+    "strings"
     "strconv"
     "bytes"
     "fmt"
@@ -280,6 +281,30 @@ func (bot *Chatbot)FleshenSQLData() {
                 continue
             }
             bot.GrumbledAt.Store(discordId, true)
+        }
+        err = rows.Err()
+        if err != nil {
+            panic(err)
+        }
+    }()
+
+    // Load the suckers who opted out of getting pressies
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        rows, err := db.Query("SELECT account_name FROM daily_package_opt_out")
+        if err != nil {
+            panic(err)
+        }
+        defer rows.Close()
+        for rows.Next() {
+            var sucker string
+            err = rows.Scan(&sucker)
+            if err != nil {
+                fmt.Println(err)
+                continue
+            }
+            AddToPackageBlackList(strings.ToLower(sucker))
         }
         err = rows.Err()
         if err != nil {
