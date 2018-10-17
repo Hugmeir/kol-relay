@@ -10,6 +10,27 @@ import (
     "github.com/Hugmeir/kolgo"
 )
 
+// This is a blacklist of people that should never, ever get
+// packages.  This is different from the opt-out feature -- there
+// is no opting in for these.  They never get anything.
+//
+// This is basically reserved for people with admin access to
+// the bot, to prevent even a whiff of multi abuse.  And whoever
+// else I don't want to ever give packages to, I guess >.>
+var hardBlacklist = map[string]bool{
+    // Admins:
+    `hugmeir`: true, // Wrote this sucker, getting packages smells strongly of multi abuse, so none for me, thanks.
+    `caducus`: true, // Has the Relay's password in case I eat the bucket.  Yep, eat the bucket.  I don't intend to go any other way.
+
+    // Bots:
+    `hekiryuu`: true, // Is a bot, bots don't get presents. /baleet Odebot goes deep
+}
+func init() {
+    for who, _ := range hardBlacklist {
+        AddToPackageBlackList(who)
+    }
+}
+
 func TodayDateString(who string) string {
     // No way I'm using the absolutely brain-dead .Format("2006") crap,
     // so we roll this ourselves
@@ -37,6 +58,55 @@ func (bot *Chatbot) SeenTodayCount(today, who string) (int, error) {
 
     // We get here if we have yet to see them today
     return 0, nil
+}
+
+func (bot *Chatbot) OptOutOfDailyPackages(who string) {
+    who = strings.ToLower(who)
+    if _, ok := carePackageBlacklist.Load(who); ok {
+        // Someone wasting resources? No need to lock the db
+        return
+    }
+
+    if _, ok := hardBlacklist[who]; ok {
+        return
+    }
+
+    AddToPackageBlackList(who)
+
+    sqliteInsert.Lock()
+    defer sqliteInsert.Unlock()
+    stmt, err := bot.Db.Prepare("INSERT OR REPLACE INTO `daily_package_opt_out` (`account_name`) VALUES (?)")
+    if err != nil {
+        fmt.Println("Failed to prepare insert for opt-out:", err)
+        return
+    }
+    defer stmt.Close()
+    _, _ = stmt.Exec(who)
+    return
+}
+
+func (bot *Chatbot) OptOutOfOptingOutOfDailyPackages(who string) {
+    who = strings.ToLower(who)
+    if _, ok := carePackageBlacklist.Load(who); !ok {
+        // Someone wasting resources? No need to lock the db
+        return
+    }
+
+    if _, ok := hardBlacklist[who]; ok {
+        // Nope.  You don't get out.
+        return
+    }
+
+    sqliteInsert.Lock()
+    defer sqliteInsert.Unlock()
+    stmt, err := bot.Db.Prepare("DELETE FROM `daily_package_opt_out` WHERE `account_name`=?")
+    if err != nil {
+        fmt.Println("Failed to prepare delete for opt-out:", err)
+        return
+    }
+    defer stmt.Close()
+    _, _ = stmt.Exec(who)
+    return
 }
 
 func (bot *Chatbot) IncreaseSeenTodayCount(today, who string) int {
@@ -67,19 +137,9 @@ func (bot *Chatbot) IncreaseSeenTodayCount(today, who string) int {
     return seen
 }
 
-// This is a blacklist of people that should never, ever get
-// packages.  This is different from the opt-out feature -- there
-// is no opting in for these.  They never get anything.
-//
-// This is basically reserved for people with admin access to
-// the bot, to prevent even a whiff of multi abuse.
-var carePackageBlacklist = map[string]string{
-    // Admins:
-    "hugmeir": "Wrote this sucker, getting packages smells strongly of multi abuse, so none for me, thanks.",
-    "caducus": "Has the Relay's password in case I eat the bucket.  Yep, eat the bucket.  I don't intend to go any other way.",
-
-    // Bots:
-    "hekiryuu": "Is a bot, bots don't get presents. /baleet Odebot goes deep",
+var carePackageBlacklist sync.Map
+func AddToPackageBlackList(who string) {
+    carePackageBlacklist.Store(who, true)
 }
 
 // Global while we try out the care packages
@@ -94,7 +154,7 @@ func (bot *Chatbot) MaybeSendCarePackage(who string) {
     // Just makes things simpler:
     who = strings.ToLower(who)
 
-    if _, ok := carePackageBlacklist[who]; ok {
+    if _, ok := carePackageBlacklist.Load(who); ok {
         // You don't get a package, sucker.
         return
     }

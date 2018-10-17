@@ -22,6 +22,10 @@ CREATE TABLE `kol_blacklist` (
     `row_created_at` DATETIME NOT NULL,
     `row_updated_at` DATETIME NOT NULL
 );
+CREATE TABLE `daily_package_opt_out` (
+    `id` INTEGER PRIMARY KEY AUTOINCREMENT,
+    `account_name` TEXT NOT NULL UNIQUE
+);
 CREATE TABLE `daily_chat_seen` (
     `id` INTEGER PRIMARY KEY AUTOINCREMENT,
     `seen_date` TEXT NOT NULL,

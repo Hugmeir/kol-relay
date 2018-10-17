@@ -4,6 +4,7 @@ import (
     "fmt"
     "time"
     "regexp"
+    "strings"
     "strconv"
     "math/rand"
     "github.com/Hugmeir/kolgo"
@@ -32,6 +33,26 @@ var privateMsgHandlers = []privateMsgHandler{
         /* user verification */
         regexp.MustCompile(`(?i)^\s*verify(?:\s* me)?!?`),
         HandleKoLVerificationRequest,
+    },
+    privateMsgHandler{
+        /* opt out of getting daily packages*/
+        regexp.MustCompile(`(?i)\A\QI do not want to have fun.\E\z`),
+        func (bot *Chatbot, message kolgo.ChatMessage, matches []string) (string, error) {
+            sucker := strings.ToLower(message.Who.Name)
+            bot.OptOutOfDailyPackages(sucker)
+            bot.KoL.SendMessage("/msg " + sucker, "This is an acknowledgement that we too consider you boring, and so you will not get any more packages.  Say 'girls, they just want to have fun.' to start getting packages again.")
+            return "", nil
+        },
+    },
+    privateMsgHandler{
+        /* opt out of getting daily packages*/
+        regexp.MustCompile(`(?i)\Agirls,? they just want to have fun\.?\z`),
+        func (bot *Chatbot, message kolgo.ChatMessage, matches []string) (string, error) {
+            sucker := strings.ToLower(message.Who.Name)
+            bot.OptOutOfOptingOutOfDailyPackages(sucker)
+            bot.KoL.SendMessage("/msg " + sucker, "Packages as far as the eye can see!")
+            return "", nil
+        },
     },
     privateMsgHandler{
         /* start holding consults */
