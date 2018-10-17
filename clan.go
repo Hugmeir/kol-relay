@@ -272,19 +272,36 @@ func (toilbot *ToilBot) EnsureAllSeekersAreWhitelisted(bot *Chatbot, clannies []
 
     whitelisted := DecodeClanWhitelist(body)
     clanniesWhitelisted := map[string]bool{}
+    clanniesToUnwhitelist := map[string]bool{}
     for _, wl := range whitelisted {
-        clanniesWhitelisted[wl.ID] = true
+        if toilbot.BlacklistedPlayer(wl.Name, wl.ID) {
+            // Huh.
+            clanniesToUnwhitelist[wl.ID] = true
+        } else {
+            clanniesWhitelisted[wl.ID] = true
+        }
     }
 
     for _, m := range clannies {
         if _, ok := clanniesWhitelisted[m.ID]; ok {
             continue
         }
+
+        // If they are back in, someone manually approved them, so
+        // assume that they should stay
+        delete(clanniesToUnwhitelist, m.ID)
+
         if m.Rank != FCA_PleasureSeekerName {
             continue
         }
 
         mods = append(mods, m)
+    }
+
+    // Remove anyone blacklisted from the whitelist.  Happens rarely, but...
+    for id, _ := range clanniesToUnwhitelist {
+        time.Sleep(5 * time.Second)
+        bot.KoL.ClanRemoveWhitelist(id)
     }
 
     if len(mods) == 0 {

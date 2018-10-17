@@ -640,6 +640,8 @@ func (bot *Chatbot)RespondToOutstandingConsults() {
         bot.HoldConsultsFor.Store(p.ID, FORTUNE_REAL_CONSULT)
     }
 
+    // Once every 30 minutes, check if we have any pending consults.
+    // This should only happen if we failed to respond to a consult.
     ticker := time.NewTicker(30 * time.Minute)
     for {select {
     case <-ticker.C:
