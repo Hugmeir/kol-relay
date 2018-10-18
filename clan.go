@@ -1,6 +1,7 @@
 package main
 
 import (
+    "regexp"
     "fmt"
     "strings"
     "bytes"
@@ -397,11 +398,8 @@ func (toilbot *ToilBot) CheckActivesAndInactives(clannies []ClanMember) {
                 continue
             }
 
-            title := member.Title
-            idx := strings.Index(title, " - ")
-            if idx >= 0 {
-                title = title[idx+3:]
-            }
+            re    := regexp.MustCompile(`\A[0-9]{1,2}\s?-\s?`)
+            title := re.ReplaceAllString(member.Title, ``)
             mods = append(mods, kolgo.ClanMemberModification{
                 ID:     member.ID,
                 RankID: newRankID,
