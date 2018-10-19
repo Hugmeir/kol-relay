@@ -291,15 +291,12 @@ func (bot *Chatbot)HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.M
         return
     }
 
-    if m.Author.Bot {
-        // Ignore other bots
-        // yes, I am hardcoding /baleet Odebot.  Take that!
-        return
-    }
-
     relayConf         := GetRelayConf()
     targetChannel, ok := relayConf["from_discord_to_kol"][m.ChannelID]
     if !ok {
+        if m.Author.Bot {
+            return // nope
+        }
         if dm, _ := ComesFromDM(s, m); dm {
             bot.HandleDM(s, m)
         }
@@ -336,11 +333,13 @@ func (bot *Chatbot)HandleMessageFromDiscord(s *discordgo.Session, m *discordgo.M
         return // respect the desire for silence
     }
 
-    go bot.DiscordMessageTriggers(s, m)
+    if !m.Author.Bot {
+        go bot.DiscordMessageTriggers(s, m)
+    }
 
     author         := m.Author.Username
     authorOverride := bot.NicknameOverride(s, m)
-    if authorOverride != "" {
+    if authorOverride != "" && !m.Author.Bot {
         author = authorOverride
         // EXPERIMENTAL: Send messages in-game if they speak up in discord
         // But only for verified clannies!  Since presumably their names match...
