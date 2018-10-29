@@ -343,7 +343,7 @@ var carePackageNotes = [][2]string{
     },
     [2]string{
         "OYSTER FACT: Cultured pearls look just like natural ones but are considered less valuable.\nStop pearl discrimination!\n\nOh and you were active in chat today, so have a little pearl from the clan stash:",
-        "",
+        "OYSTER FACT: The oyster you eat and the oyster that create pearls are actually different animals.  Assuming you eat oysters, at least.",
     },
     [2]string{
         "Writing wholesome messages is hard, but you put the effort and sent messages in clan chat today, so... <3",
@@ -357,11 +357,59 @@ var carePackageNotes = [][2]string{
         "As a branded talker, you must carry this item forever in penance.  Or until you get rid of it, whichever comes first:",
         "",
     },
+    [2]string{
+        // Thanks Tim Minchin, you rock.
+        "I worry that because a lot of the conversations in /clan are stupid, people will leave chat thinking we lack depth.  So to help with that a bit, ponder this:",
+        "Wow, that was really deep, wasn't it?",
+    },
+    [2]string{
+        "This chatroom might just be big enough for all of us -- but the clan stash is overflowing, so help the cause and take one of these:",
+        "",
+    },
+    [2]string{
+        "They say the secret to happiness starts with baleeting Odebot, but talking in chat is probably a close second!\n\nSo hopefully this will improve your day a bit:",
+        "They also say that sending packages to people in-run brings joy.",
+    },
+    [2]string{
+        "What the... How did you know? Talking in chat?\n\nI love that move!\n\nIf I could reward you for it, I would, so... Here you go!",
+        "",
+    },
+    [2]string{
+        "Look at this chat!\nEvery single time it makes me laugh\nHow did Odebot get so dunked\nAnd what the hell is that effect?\n\nOh and here's an item for talking today:",
+        "(It appears that the chat being referenced was surreptitiously removed by bot sympathizers)",
+    },
+    [2]string{
+        "If you stand in front of a mirror and repeat 'Bloody Mina' three times, nothing will happen, but just speaking a couple of times in clan chat got you one of these:",
+        "Probably best to not say 'Bloody Mina' three times in chat though, lest you actually summon her wrath.",
+    },
+    [2]string{
+        "9 out of 10 relays recommend talking in chat like you did today!",
+        "We do not speak of the rogue relay.",
+    },
+    [2]string{
+        "Talking in chat means that you've talked in chat.  And getting this item means you've gotten this item.",
+        "Don't search for meaning in kmails -- We recommend fortune cookies instead.",
+    },
+    [2]string{
+        "This bot rates your recent comments at around one of these:",
+        "Maybe you should try harder in the future, and the future is now, since you had to hold on to that package.",
+    },
+    [2]string{
+        "Wow, that was a close call, but you did it!\n\nSeriously, that was cutting it very close.  Was starting to think you didn't have it under control...\n\nAnyway, here's a little reward:",
+        "Best if we don't tell anyone how close things got, they might freak out a bit.",
+    },
+    [2]string{
+        "Did you know that Jenn donated the VIP Key that this bot uses?  That's why she rules, ok?\n\nWhat did you do today? Huh?\n\nOh, you talked in chat, fair enough.  Here's some goodies!",
+        "",
+    },
 }
 
 func PickMessageText(who string) (string, string) {
-    // The player's name is the RNG seed:
-    var i int64 = 0
+    // The player's name + current month is the RNG seed, so
+    // every month they get a new set of greetings.  This
+    // will be particularly useful once we have 60+ greetings
+    _, month, today := time.Now().Date()
+    var i int64 = int64(month)
     for _, r := range who {
         i += int64(r)
     }
@@ -381,7 +429,6 @@ func PickMessageText(who string) (string, string) {
     }
 
     // Pick our winner:
-    _, _, today := time.Now().Date()
     t := shuffled[ today % len(shuffled) ]
     return t[0], t[1]
 }
