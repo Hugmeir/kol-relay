@@ -278,6 +278,7 @@ bled":false,"bot":false}],"reactions":null,"type":0}
 var extraUnhandledMentions = regexp.MustCompile(`(?i)<(:[^:]+:)[0-9]+>`)
 
 func (bot *Chatbot)ClearMoreUnhandledDiscordery(msg string) string {
+    msg = strings.Replace(msg, `<:catplanet:493885480971141152>`, `[BLACK AND WHITE PICTURE OF A CAT FACE]`, -1)
     msg = extraUnhandledMentions.ReplaceAllString(msg, `$1`)
     for rank, name := range bot.DiscordExtra.RankIDToName {
         msg = strings.Replace(msg, rank, name, -1)
