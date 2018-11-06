@@ -424,10 +424,6 @@ func PickMessageText(who string) (string, string) {
         shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
     })
 
-    if len(shuffled) > 31 {
-        fmt.Println("Our dumb shuffler will never get to the final entries, there's just too many!")
-    }
-
     // Pick our winner:
     t := shuffled[ today % len(shuffled) ]
     return t[0], t[1]

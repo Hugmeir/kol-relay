@@ -151,61 +151,75 @@ func BuffyRequest(who string, wantedBuffs map[string]int) {
     defer resp.Body.Close()
 }
 
-var effectMatcher  = regexp.MustCompile(`(?i)<img src="[^"]+12x12(heart|skull)\.[^"]+"[^>]*>`)
-var slashMeMatcher = regexp.MustCompile(`(?i)\A<b><i><a target=mainpane href=[^>]+><font color[^>]+>([^<]+)<\\?/b><\\?/font><\\?/a>(.+)<\\?/i>\z`)
+var safariMatcher = regexp.MustCompile(`(?i)<i title="([^"]*)">([^<]+)</i>`)
+var commentMatcher   = regexp.MustCompile(`(?i)<!--[A-Za-z0-9]*-->`)
+func ResolveChatEffects (s string) string {
+    s = commentMatcher.ReplaceAllString(s, ``)
+    s = safariMatcher.ReplaceAllString(s, `*$2* ($1)`)
+    return s
+}
+var goldenGumMatcher  = regexp.MustCompile(`(?i)<span[^>]*>([^<]+)</span>`)
+var holidayFunMatcher = regexp.MustCompile(`(?i)<font[^>]*>([^<]+)</font>`)
+func RemoveChatColors(s string) string {
+    s = goldenGumMatcher.ReplaceAllString(s, `$1`)
+    s = holidayFunMatcher.ReplaceAllString(s, `$1`)
+    s = strings.Replace(s, `<b>`,  ``, -1) // Pirate Bellow
+    s = strings.Replace(s, `</b>`, ``, -1)
+    return s
+}
+
+var effectMatcher  = regexp.MustCompile(`(?i)<img src="[^"]+12x12(heart|skull|snowman)\.[^"]+"[^>]*>`)
+var slashMeMatcher = regexp.MustCompile(`(?i)\A(?:<b>)?<i><a target=mainpane href=[^>]+>(?:<font color[^>]+>)?([^<]+)(?:<\\?/b>)?(?:<\\?/font>)?<\\?/a>(.+)<\\?/i>\z`)
 var captureItalics = regexp.MustCompile(`(?i)<i>((?:[^<]+|<\s*/?\s*[^i])+)</i>`)
 var captureExtraLinks = regexp.MustCompile(`(?i)<a[^>]*>([^<]+)</a>`)
 var effectToCmdDefaults  map[string]string = map[string]string{
     // Defaults:
     "heart": `🖤`,
     "skull": `☠`,
+    "snowman": "\u26C4", // SNOWMAN WITHOUT SNOW
     "?": "",
 }
 func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCmd map[string]string) (string, error) {
     preparedMessage := message.Msg
     preparedSender  := fmt.Sprintf("**%s**: ", EscapeDiscordMetaCharacters(message.Who.Name))
 
-    wrapAround := make(map[string]bool, 3)
+    messagePrepend := []string{}
+    messageAppend  := []string{}
 
     preparedMessage, urls := FixMangledChatLinks(preparedMessage)
+    preparedMessage = ResolveChatEffects(preparedMessage)
 
     if strings.HasPrefix(preparedMessage, "<") {
         // golden text, chat effects, etc.
+        preparedMessage = RemoveChatColors(preparedMessage)
         preparedMessage = effectMatcher.ReplaceAllStringFunc(preparedMessage, func(t string) string {
             wrapperType := "?"
             if strings.Contains(t, `heart`) {
-                wrapperType = `heart`
+                wrapperType = `heart`   // LOV Emotionizer
             } else if strings.Contains(t, `skull`) {
-                wrapperType = `skull`
+                wrapperType = `skull`   // Pirate Bellow
+            } else if strings.Contains(t, `snowman`) {
+                wrapperType = `snowman` // Aggressive Carrot
             }
 
             c, ok := effectToCmd[wrapperType]
             if !ok {
                 c = effectToCmdDefaults[wrapperType]
             }
-            wrapAround[c] = true
+
+            messagePrepend = append(messagePrepend, c)
+            if wrapperType != `snowman` {
+                messageAppend = append(messageAppend, c)
+            }
             return ``
         })
 
         if meMatch := slashMeMatcher.FindStringSubmatch(preparedMessage); len(meMatch) > 0 {
             // /me foo
-            wrapAround["_"] = true
+            messagePrepend = append(messagePrepend, `_`)
+            messageAppend  = append(messageAppend,  `_`)
             preparedSender  = fmt.Sprintf("**%s**", EscapeDiscordMetaCharacters(meMatch[1]))
             preparedMessage = " " + meMatch[2] // message WITHOUT the username
-        }
-
-        tokens := html.NewTokenizer(strings.NewReader(preparedMessage))
-        preparedMessage = ""
-        loop:
-        for {
-            tt := tokens.Next()
-            switch tt {
-            case html.ErrorToken:
-                break loop
-            case html.TextToken:
-                preparedMessage = preparedMessage + string(tokens.Text())
-            }
-            // TODO: could grab colors & apply them in markdown
         }
     }
 
@@ -288,8 +302,11 @@ func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCm
 
     finalMsg := fmt.Sprintf("%s%s", preparedSender, preparedMessage)
 
-    for wrap, _ := range wrapAround {
-        finalMsg = wrap + finalMsg + wrap
+    for _, wrap := range messagePrepend {
+        finalMsg = wrap + finalMsg
+    }
+    for _, wrap := range messageAppend {
+        finalMsg = finalMsg + wrap
     }
 
     if message.Channel != "clan" {
