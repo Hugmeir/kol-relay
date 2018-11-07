@@ -152,15 +152,17 @@ func BuffyRequest(who string, wantedBuffs map[string]int) {
 }
 
 var safariMatcher = regexp.MustCompile(`(?i)<i title="([^"]*)">([^<]+)</i>`)
-var commentMatcher   = regexp.MustCompile(`(?i)<!--[A-Za-z0-9]*-->`)
 func ResolveChatEffects (s string) string {
-    s = commentMatcher.ReplaceAllString(s, ``)
     s = safariMatcher.ReplaceAllString(s, `*$2* ($1)`)
     return s
 }
 var goldenGumMatcher  = regexp.MustCompile(`(?i)<span[^>]*>([^<]+)</span>`)
 var holidayFunMatcher = regexp.MustCompile(`(?i)<font[^>]*>([^<]+)</font>`)
 func RemoveChatColors(s string) string {
+    // Vivala:
+    s = strings.Replace(s, `<font color=red><b>v</b></font>`, `**v**`, -1)
+    s = strings.Replace(s, `<font color=red><b>V</b></font>`, `**V**`, -1)
+
     s = goldenGumMatcher.ReplaceAllString(s, `$1`)
     s = holidayFunMatcher.ReplaceAllString(s, `$1`)
     s = strings.Replace(s, `<b>`,  ``, -1) // Pirate Bellow
@@ -179,6 +181,12 @@ var effectToCmdDefaults  map[string]string = map[string]string{
     "snowman": "\u26C4", // SNOWMAN WITHOUT SNOW
     "?": "",
 }
+
+var commentMatcher = regexp.MustCompile(`(?i)<!--(?:[^-]*)-->`)
+func RemoveHtmlComments(s string) string {
+    s = commentMatcher.ReplaceAllString(s, ``)
+    return s
+}
 func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCmd map[string]string) (string, error) {
     preparedMessage := message.Msg
     preparedSender  := fmt.Sprintf("**%s**: ", EscapeDiscordMetaCharacters(message.Who.Name))
@@ -187,11 +195,10 @@ func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCm
     messageAppend  := []string{}
 
     preparedMessage, urls := FixMangledChatLinks(preparedMessage)
-    preparedMessage = ResolveChatEffects(preparedMessage)
+    preparedMessage = RemoveHtmlComments(preparedMessage)
 
     if strings.HasPrefix(preparedMessage, "<") {
         // golden text, chat effects, etc.
-        preparedMessage = RemoveChatColors(preparedMessage)
         preparedMessage = effectMatcher.ReplaceAllStringFunc(preparedMessage, func(t string) string {
             wrapperType := "?"
             if strings.Contains(t, `heart`) {
@@ -284,7 +291,12 @@ func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCm
     }
     preparedMessage = captureExtraLinks.ReplaceAllString(preparedMessage, `$1`)
 
-    preparedMessage = captureItalics.ReplaceAllString(preparedMessage, `*$1*`)
+    for i := 1; i <= 2; i++ {
+        preparedMessage = ResolveChatEffects(preparedMessage)
+        preparedMessage = RemoveChatColors(preparedMessage)
+        preparedMessage = captureItalics.ReplaceAllString(preparedMessage, `*$1*`)
+    }
+
     // foo: * foo* does not italize the second foo, because '* ' disables
     // the metacharacter.  We could switch to using _ foo_, but then we
     // need to guard against the final character being a _ within a /me message,
