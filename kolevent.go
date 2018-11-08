@@ -68,6 +68,28 @@ var kolEventHandlers = []kolEventHandler{
         },
     },
     kolEventHandler {
+        /*safari*/
+        /* {"msgs":[{"type":"event","msg":"<a class=nounder target=mainpane href=showplayer.php?who=1740784><b>Ganomex<\/b><\/a> has blessed you with the ability to experience a safari adventure. (15 Adventures)","link":false,"time":"1541714573"}],"last":"1470542290","delay":3000} */
+        regexp.MustCompile(`(?i)<a[^>]+href=["']?showplayer\.php\?who=([0-9]+)["']?[^>]*>(?:<b>)?([^<]+)(?:<\\?/b>)?<\\?/a> has blessed you with the ability to experience a safari`),
+        func (bot *Chatbot, message kolgo.ChatMessage, matches []string) (string, error) {
+            fmt.Printf("Safari'd by %s (%s), raw message: %s", matches[1], matches[2], message.Msg)
+            senderId := matches[1]
+            bot.KoL.SendMessage("/msg " + senderId, "Remember -- keep your abuse precise & directed.  By hitting the relay you are annoying too many people at once.")
+
+            e := &Effect{
+                ID:   safari,
+                Name: "On Safari",
+            }
+
+            cleared, _ := bot.Uneffect(e)
+            toDiscord := fmt.Sprintf("%s (#%s) made the bot go on an unwanted safari adventure.", matches[2], matches[1])
+            if ! cleared {
+                toDiscord = toDiscord + " And it could not be uneffected, so the relayed messages will get effects."
+            }
+            return toDiscord, nil
+        },
+    },
+    kolEventHandler {
         /*demotivator*/
         /* sent you a really unmotivating card */
         regexp.MustCompile(`(?i)<a href='showplayer\.php\?who=([0-9]+)' [^>]+>([^<]+)<\/a> sent you a really unmotivating card`),

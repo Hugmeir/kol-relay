@@ -408,6 +408,7 @@ const (
     bruisedJaw  = "697"
     snowBall    = "718"
     unmotivated = "795"
+    safari      = "2425"
 )
 
 type Effect struct {
@@ -584,26 +585,39 @@ const (
     EffectSource
     EffectID
 )
-type APIStatus struct {
-    ID          string              `json:"playerid"`
-    Name        string              `json:"name"`
-    Effects     map[string][]string `json:"effects"`
+type APIStatusJSON struct {
+    ID          interface{}              `json:"playerid"`
+    Name        interface{}              `json:"name"`
+    Effects     map[string][]interface{} `json:"effects"`
 }
-func DecodeStatusResponse(body []byte) *APIStatus {
-    var st APIStatus
+
+func LousyToString(p interface{}) string {
+    switch p.(type) {
+        case string:
+            str, _ := p.(string)
+            return str
+        case float64:
+            f, _ := p.(float64)
+            return strconv.Itoa(int(f))
+    }
+    return ""
+}
+
+func DecodeStatusResponse(body []byte) *APIStatusJSON {
+    var st APIStatusJSON
     err := json.Unmarshal(body, &st)
     if err != nil {
         return nil
     }
     return &st
 }
-func RawEffectToEffect(r []string) *Effect {
-    turns, _ := strconv.Atoi(r[EffectTurns])
+func RawEffectToEffect(r []interface{}) *Effect {
+    turns, _ := strconv.Atoi(LousyToString(r[EffectTurns]))
     return &Effect{
-        ID:     r[EffectID],
-        Name:   r[EffectName],
+        ID:     LousyToString(r[EffectID]),
+        Name:   LousyToString(r[EffectName]),
         Turns:  turns,
-        Source: r[EffectSource],
+        Source: LousyToString(r[EffectSource]),
     }
 }
 
@@ -630,6 +644,7 @@ func (bot *Chatbot) ClearUnwantedEffects() {
         "697": true,
         "718": true,
         "795": true,
+        "2425": true,
     }
     for _, e := range effects {
         if _, ok := mustUneffect[e.ID]; !ok {
