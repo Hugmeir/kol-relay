@@ -153,7 +153,10 @@ func BuffyRequest(who string, wantedBuffs map[string]int) {
 
 var safariMatcher = regexp.MustCompile(`(?i)<i title="([^"]*)">([^<]+)</i>`)
 func ResolveChatEffects (s string) string {
-    s = safariMatcher.ReplaceAllString(s, `*$2* ($1)`)
+    s  = safariMatcher.ReplaceAllStringFunc(s, func (inner string) string {
+        m := safariMatcher.FindStringSubmatch(inner)
+        return fmt.Sprintf("*%s* (%s)", strings.Replace(m[2], ` `, ``, -1), m[1])
+    })
     return s
 }
 var goldenGumMatcher  = regexp.MustCompile(`(?i)<span[^>]*>([^<]+)</span>`)
@@ -172,7 +175,7 @@ func RemoveChatColors(s string) string {
 
 var effectMatcher  = regexp.MustCompile(`(?i)<img src="[^"]+12x12(heart|skull|snowman)\.[^"]+"[^>]*>`)
 var slashMeMatcher = regexp.MustCompile(`(?i)\A(?:<b>)?<i><a target=mainpane href=[^>]+>(?:<font color[^>]+>)?([^<]+)(?:<\\?/b>)?(?:<\\?/font>)?<\\?/a>(.+)<\\?/i>\z`)
-var captureItalics = regexp.MustCompile(`(?i)<i>((?:[^<]+|<\s*/?\s*[^i])+)</i>`)
+var captureItalics = regexp.MustCompile(`(?i)<i>((?:[^<]+|<\s*/?\s*[^i])+)\s*</i>`)
 var captureExtraLinks = regexp.MustCompile(`(?i)<a[^>]*>([^<]+)</a>`)
 var effectToCmdDefaults  map[string]string = map[string]string{
     // Defaults:
@@ -296,17 +299,6 @@ func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCm
         preparedMessage = RemoveChatColors(preparedMessage)
         preparedMessage = captureItalics.ReplaceAllString(preparedMessage, `*$1*`)
     }
-
-    // foo: * foo* does not italize the second foo, because '* ' disables
-    // the metacharacter.  We could switch to using _ foo_, but then we
-    // need to guard against the final character being a _ within a /me message,
-    // which sounds like work.
-    // So just fix the weirdness by replacing all '* ' with ' *'
-    // Note: We need to do extra work to ensure we don't replace *escaped*
-    // metacharacters, and to ensure that start-of-string is handled too.
-    // How I miss you, positive lookbehind...
-    fixDiscordWeirdness := regexp.MustCompile(`([^\\])\* |^\* `)
-    preparedMessage = fixDiscordWeirdness.ReplaceAllString(preparedMessage, `$1 *`)
 
     // the very *last* thing we do is unescape html meta characters;
     // putting it earlier breaks all the other escapes.
