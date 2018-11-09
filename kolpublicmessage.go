@@ -319,7 +319,7 @@ func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCm
 
     go func() {
         ode   := regexp.MustCompile(`(?i)\Aode(?:\s*[^ ]*)?\z`)
-        buffs := regexp.MustCompile(`(?i)\Abuffs(?:\s*[^ ]*)?\z`)
+        buffs := regexp.MustCompile(`(?i)\A(?:pl(?:ease|s|z)\s+)?buff(?:s?(?:\s*[^ ]*)?)\z`)
         bots  := regexp.MustCompile(`(?i)\Abots\??\z`)
         if ode.MatchString(preparedMessage) {
             RequestOdeFor(message.Who.Name)
