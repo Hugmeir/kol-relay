@@ -77,10 +77,11 @@ var kolEventHandlers = []kolEventHandler{
             bot.KoL.SendMessage("/msg " + senderId, "Remember -- keep your abuse precise & directed.  By hitting the relay you are annoying too many people at once.")
 
             e := &Effect{
-                ID:   safari,
+                ID:   onSafari,
                 Name: "On Safari",
             }
 
+            time.Sleep(1 * time.Second)
             cleared, _ := bot.Uneffect(e)
             toDiscord := fmt.Sprintf("%s (#%s) made the bot go on an unwanted safari adventure.", matches[2], matches[1])
             if ! cleared {

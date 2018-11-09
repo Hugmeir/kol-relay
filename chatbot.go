@@ -408,7 +408,7 @@ const (
     bruisedJaw  = "697"
     snowBall    = "718"
     unmotivated = "795"
-    safari      = "2425"
+    onSafari    = "2425"
 )
 
 type Effect struct {
