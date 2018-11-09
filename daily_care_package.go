@@ -379,8 +379,8 @@ var carePackageNotes = [][2]string{
         "(It appears that the chat being referenced was surreptitiously removed by bot sympathizers)",
     },
     [2]string{
-        "If you stand in front of a mirror and repeat 'Bloody Mina' three times, nothing will happen, but just speaking a couple of times in clan chat got you one of these:",
-        "Probably best to not say 'Bloody Mina' three times in chat though, lest you actually summon her wrath.",
+        "This appears to be a placeholder message.  The developer will surely, one day, fill in this placeholder.  The real text will praise -- or berate! -- the message you just sent to clan chat.\n\nOoh, you would've been so elated and/or hurt.",
+        "This is another placeholder message.  Looks like the developer spent a couple of minutes dissing Odebot here and then gave up.\n\nStay strong developer!",
     },
     [2]string{
         "9 out of 10 relays recommend talking in chat like you did today!",
