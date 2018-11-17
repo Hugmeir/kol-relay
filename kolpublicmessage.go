@@ -202,6 +202,7 @@ func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCm
 
     if strings.HasPrefix(preparedMessage, "<") {
         // golden text, chat effects, etc.
+        seen := make(map[string]bool, 3)
         preparedMessage = effectMatcher.ReplaceAllStringFunc(preparedMessage, func(t string) string {
             wrapperType := "?"
             if strings.Contains(t, `heart`) {
@@ -210,6 +211,10 @@ func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCm
                 wrapperType = `skull`   // Pirate Bellow
             } else if strings.Contains(t, `snowman`) {
                 wrapperType = `snowman` // Aggressive Carrot
+            }
+
+            if _, ok := seen[wrapperType]; ok {
+                return ``
             }
 
             c, ok := effectToCmd[wrapperType]
@@ -221,6 +226,7 @@ func (bot *Chatbot) HandleKoLPublicMessage(message kolgo.ChatMessage, effectToCm
             if wrapperType != `snowman` {
                 messageAppend = append(messageAppend, c)
             }
+            seen[wrapperType] = true
             return ``
         })
 
