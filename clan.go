@@ -1,6 +1,7 @@
 package main
 
 import (
+    "os"
     "regexp"
     "fmt"
     "strings"
@@ -194,9 +195,17 @@ func (toilbot *ToilBot) CheckNewApplications(bot *Chatbot) {
         }
 
         if bytes.Contains(body, []byte(`You cannot accept new members into the clan.`)) {
+            fmt.Println("No permissions to accept new clannies")
             toilbot.Stop = true
             return
         }
+
+        f, err := os.OpenFile("/tmp/kol_applications", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+        if err == nil {
+            defer f.Close()
+            f.Write(body)
+        }
+
         clannies := []kolgo.ClanMemberModification{
             kolgo.ClanMemberModification{
                 ID:     app.PlayerID,

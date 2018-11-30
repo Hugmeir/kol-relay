@@ -95,7 +95,6 @@ func ReadBlacklist(conf *GoogleSheetsConfig) []ClanBlacklistEntry {
 
     for _, row := range resp.Values {
         if len(row) < 4 {
-            fmt.Println("Corrupted line in blacklist: ", len(row), " | ", row)
             continue
         }
         if blacklisted, ok := row[BLBlacklisted].(string); !ok || blacklisted == "" {
