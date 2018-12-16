@@ -106,6 +106,8 @@ var baseBuffs = map[string]int{
     "4007": 600,
     "4008": 600,
     "4019": 600,
+    "6006": 600,
+    "6010": 600,
 }
 
 const BuffyUrl = "https://kol.obeliks.de/buffbot/buff"
