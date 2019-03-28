@@ -1,5 +1,6 @@
 package main
 import (
+    "path"
     "errors"
     "os"
     "os/signal"
@@ -60,6 +61,7 @@ type Chatbot struct {
 }
 
 const killFile = "/tmp/kol-relay-KILL"
+var logDirectory string
 func init() {
     rand.Seed(time.Now().UnixNano())
 
@@ -76,6 +78,7 @@ func init() {
     flag.BoolVar(  &prodMode,        "wet_run",   false, "Running in production environment")
 
     flag.StringVar(&googleConfDir,    "google_conf_dir",    "", "Path to a dir holding credentials.json, token.json, and sheets.json")
+    flag.StringVar(&logDirectory,     "log_dir",            "/var/log/kol-relay/", "Where to place the logs")
 
     flag.Parse()
 
@@ -705,9 +708,8 @@ func (bot *Chatbot)RespondToOutstandingConsults() {
 }
 
 func main() {
-    fromDiscordLogfile := "/var/log/kol-relay/relay.log"
-    fromKoLLogfile     := "/var/log/kol-relay/from_kol.log"
-
+    fromDiscordLogfile := path.Join(logDirectory, `relay.log`)
+    fromKoLLogfile     := path.Join(logDirectory, `from_kol.log`)
     fromDiscord, err := os.OpenFile(fromDiscordLogfile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
     if err != nil {
         panic(err)
