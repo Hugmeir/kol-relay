@@ -647,7 +647,8 @@ func (bot *Chatbot) ClearUnwantedEffects() {
         "697": true,
         "718": true,
         "795": true,
-        "2425": true,
+        "2425": true, // Safari
+        "2470": true, // Harpoon
     }
     for _, e := range effects {
         if _, ok := mustUneffect[e.ID]; !ok {

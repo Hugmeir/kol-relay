@@ -91,6 +91,28 @@ var kolEventHandlers = []kolEventHandler{
         },
     },
     kolEventHandler {
+        /*cartoon harpoon*/
+        /*{"msgs":[{"type":"event","msg":"<a href='showplayer.php?who=3061055' target=mainpane class=nounder style='color: green'>Hugmeir<\/a> has hit you with a cartoon harpoon!<!--refresh-->","link":false,"time":"1560371338"}],"last":"1480416499","delay":3000}*/
+        regexp.MustCompile(`(?i)<a[^>]+href=["']?showplayer\.php\?who=([0-9]+)["']?[^>]*>(?:<b>)?([^<]+)(?:<\\?/b>)?<\\?/a> has hit you with a cartoon harpoon`),
+        func (bot *Chatbot, message kolgo.ChatMessage, matches []string) (string, error) {
+            fmt.Printf("Harpoon'd by %s (%s), raw message: %s", matches[1], matches[2], message.Msg)
+            senderId := matches[1]
+            bot.KoL.SendMessage("/msg " + senderId, "Please don't Harpoon the relay -- you are basically making chat irksome for many people at once.  Keep your abuse targetted!")
+
+            e := &Effect{
+                ID:   "2470",
+                Name: "Harpooned and Marooned",
+            }
+
+            cleared, _ := bot.Uneffect(e)
+            toDiscord := fmt.Sprintf("%s (#%s) threw a cartoon harpoon at the relay, trying to ruin the experience for many. Shun.", matches[2], matches[1])
+            if ! cleared {
+                toDiscord = toDiscord + " And it could not be uneffected, so the relayed messages will get effects."
+            }
+            return toDiscord, nil
+        },
+    },
+    kolEventHandler {
         /*demotivator*/
         /* sent you a really unmotivating card */
         regexp.MustCompile(`(?i)<a href='showplayer\.php\?who=([0-9]+)' [^>]+>([^<]+)<\/a> sent you a really unmotivating card`),
